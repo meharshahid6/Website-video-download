@@ -64,18 +64,32 @@ async function prepare(tabId) {
       document.body.style.overflow = 'hidden';
       document.documentElement.style.overflow = 'hidden';
 
-      // Hide all page chrome: headers, sidebars, navigation, footers
+      // Hide all page chrome — make iframe's entire parent chain visible
+      // while hiding everything else. Can't use `body > *` because the
+      // iframe is nested deep inside divs, not a direct child of body.
       const overlay = document.createElement('style');
       overlay.id = 'frame-recorder-hide-chrome';
       overlay.textContent = `
-        body > *:not(iframe[data-frame-recorder]):not(#frame-recorder-restore):not(#frame-recorder-hide-chrome):not(#frame-recorder-hud) {
-          display: none !important;
-        }
         body { margin: 0 !important; padding: 0 !important; background: #000 !important; }
-        html { scrollbar-width: none !important; }
+        html { scrollbar-width: none !important; background: #000 !important; }
         html::-webkit-scrollbar { display: none !important; }
+        /* Hide everything by default */
+        body * { visibility: hidden !important; }
+        /* Force the iframe and its content visible */
+        iframe[data-frame-recorder],
+        iframe[data-frame-recorder] * { visibility: visible !important; }
+        /* Keep our own UI visible */
+        #frame-recorder-hud, #frame-recorder-hud * { visibility: visible !important; }
       `;
       document.head.append(overlay);
+
+      // Walk up the iframe's parent chain and force each ancestor visible
+      let el = frame.parentElement;
+      while (el && el !== document.documentElement) {
+        el.style.setProperty('visibility', 'visible', 'important');
+        el.dataset.frameRecorderChain = 'true';
+        el = el.parentElement;
+      }
     }
   }});
 }
@@ -97,6 +111,11 @@ async function cleanup(tabId) {
     }
     // Remove page-chrome-hiding style
     document.getElementById('frame-recorder-hide-chrome')?.remove();
+    // Restore parent chain visibility
+    document.querySelectorAll('[data-frame-recorder-chain]').forEach(el => {
+      el.style.removeProperty('visibility');
+      delete el.dataset.frameRecorderChain;
+    });
     // Remove HUD
     document.getElementById('frame-recorder-hud')?.remove();
   }}).catch(() => {});

@@ -36,14 +36,63 @@
     chrome.runtime.sendMessage({ type: 'player-state', data }).catch(() => {});
   }
 
-  /* ── Auto-play the video ────────────────────────────────────── */
+  /* ── Auto-play the video (robust multi-strategy) ─────────── */
+  let autoPlayAttempts = 0;
   function autoPlay() {
     if (!video) return;
     // Set speed to 1x if not already
     if (video.playbackRate !== 1) video.playbackRate = 1;
-    // Play if paused (but not if ended — user may want to stop)
-    if (video.paused && !video.ended) {
-      video.play().catch(() => {});
+    // Already playing — done
+    if (!video.paused && !video.ended) return;
+    if (video.ended) return;
+
+    autoPlayAttempts++;
+
+    // Strategy 1: Direct play() call
+    const playPromise = video.play();
+    if (playPromise) {
+      playPromise.catch(() => {
+        // Strategy 2: Simulate click on the video element (triggers user gesture)
+        try {
+          video.click();
+          video.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        } catch (_) {}
+
+        // Strategy 3: Find and click BunnyCDN play button overlay
+        setTimeout(() => {
+          if (video.paused) {
+            // Look for common play button selectors in BunnyCDN / other players
+            const playButtons = document.querySelectorAll(
+              '.bmpui-ui-playbacktoggle-overlay, ' +
+              '.vjs-big-play-button, ' +
+              '.plyr__control--overlaid, ' +
+              '[class*="play-button"], ' +
+              '[class*="PlayButton"], ' +
+              '[class*="playButton"], ' +
+              '[aria-label="Play"], ' +
+              '[data-plyr="play"], ' +
+              'button[class*="play"], ' +
+              '.bmpui-ui-hugeplaybacktogglebutton'
+            );
+            playButtons.forEach(btn => {
+              try { btn.click(); } catch (_) {}
+            });
+
+            // Strategy 4: Click the video's parent container
+            try {
+              const container = video.closest('[class*="player"]') || video.parentElement;
+              if (container) container.click();
+            } catch (_) {}
+          }
+        }, 300);
+      });
+    }
+
+    // Retry a few times with increasing delay
+    if (autoPlayAttempts < 5 && video.paused) {
+      setTimeout(() => {
+        if (video && video.paused && !video.ended) autoPlay();
+      }, autoPlayAttempts * 500 + 500);
     }
   }
 
