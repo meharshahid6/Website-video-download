@@ -36,13 +36,13 @@
     chrome.runtime.sendMessage({ type: 'player-state', data }).catch(() => {});
   }
 
-  /* ── Auto-play the video (robust multi-strategy) ─────────── */
+  /* ── Auto-play the video (universal multi-strategy) ─────────── */
   let autoPlayAttempts = 0;
   function autoPlay() {
     if (!video) return;
-    // Set speed to 1x if not already
+    // Ensure 1x playback rate
     if (video.playbackRate !== 1) video.playbackRate = 1;
-    // Already playing — done
+    // Already playing
     if (!video.paused && !video.ended) return;
     if (video.ended) return;
 
@@ -52,74 +52,113 @@
     const playPromise = video.play();
     if (playPromise) {
       playPromise.catch(() => {
-        // Strategy 2: Simulate click on the video element (triggers user gesture)
+        // Strategy 2: Click center of the video (hits custom center play buttons like iSkills blue circle)
         try {
-          video.click();
-          video.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+          const r = video.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            const centerEl = document.elementFromPoint(cx, cy);
+            if (centerEl && centerEl !== video) {
+              centerEl.click();
+              centerEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            }
+          }
         } catch (_) {}
 
-        // Strategy 3: Find and click BunnyCDN play button overlay
+        // Strategy 3: Click common play button selectors across LMS platforms (iSkills, EzyCourse, Bunny, Plyr, Video.js)
         setTimeout(() => {
-          if (video.paused) {
-            // Look for common play button selectors in BunnyCDN / other players
-            const playButtons = document.querySelectorAll(
-              '.bmpui-ui-playbacktoggle-overlay, ' +
-              '.vjs-big-play-button, ' +
-              '.plyr__control--overlaid, ' +
-              '[class*="play-button"], ' +
-              '[class*="PlayButton"], ' +
-              '[class*="playButton"], ' +
-              '[aria-label="Play"], ' +
-              '[data-plyr="play"], ' +
-              'button[class*="play"], ' +
-              '.bmpui-ui-hugeplaybacktogglebutton'
-            );
-            playButtons.forEach(btn => {
-              try { btn.click(); } catch (_) {}
-            });
+          if (!video || !video.paused) return;
 
-            // Strategy 4: Click the video's parent container
-            try {
-              const container = video.closest('[class*="player"]') || video.parentElement;
-              if (container) container.click();
-            } catch (_) {}
+          const playButtons = document.querySelectorAll(
+            // iSkills / EzyCourse / LMS specific
+            '._video_play_btn, ' +
+            '[class*="video_play" i], ' +
+            '[class*="play_icon" i], ' +
+            '[class*="play_btn" i], ' +
+            '[class*="playBtn" i], ' +
+            // Center / big play buttons
+            '.bmpui-ui-playbacktoggle-overlay, ' +
+            '.bmpui-ui-hugeplaybacktogglebutton, ' +
+            '.vjs-big-play-button, ' +
+            '.plyr__control--overlaid, ' +
+            '[data-plyr="play"], ' +
+            // Generic play buttons
+            '[aria-label="Play" i], ' +
+            '[aria-label*="play" i], ' +
+            '[title="Play" i], ' +
+            '[title*="play" i], ' +
+            'button[class*="play" i], ' +
+            'div[class*="play" i][role="button"], ' +
+            '[class*="play-button" i], ' +
+            '[class*="PlayButton" i], ' +
+            '[class*="big-play" i]'
+          );
+          playButtons.forEach(btn => {
+            try { btn.click(); } catch (_) {}
+          });
+
+          // Strategy 4: Click the video and its player container
+          try {
+            video.click();
+            const container = video.closest('.video-js, .plyr, [class*="player" i]') || video.parentElement;
+            if (container && container !== document.body) container.click();
+          } catch (_) {}
+
+          // Strategy 5: Autoplay policy fallback (brief mute then unmute to bypass strict browser block)
+          if (video.paused && autoPlayAttempts >= 2) {
+            video.muted = true;
+            video.play().then(() => {
+              setTimeout(() => { if (video) video.muted = false; }, 300);
+            }).catch(() => {});
           }
-        }, 300);
+        }, 250);
       });
     }
 
-    // Retry a few times with increasing delay
-    if (autoPlayAttempts < 5 && video.paused) {
+    // Retry with increasing intervals if still paused
+    if (autoPlayAttempts < 6 && video.paused) {
       setTimeout(() => {
         if (video && video.paused && !video.ended) autoPlay();
-      }, autoPlayAttempts * 500 + 500);
+      }, autoPlayAttempts * 400 + 400);
     }
   }
 
-  /* ── Hide BunnyCDN / player controls for clean recording ──── */
+  /* ── Universal player controls hiding for clean recording ──── */
   function hidePlayerControls() {
     if (controlsHidden) return;
-    // Check if we're inside the BunnyCDN iframe
-    if (!location.hostname.includes('mediadelivery.net')) return;
 
     const style = document.createElement('style');
     style.id = 'frame-recorder-hide-controls';
     style.textContent = `
-      /* Hide BunnyCDN player controls, overlays, watermarks */
+      /* HTML5 native controls */
+      video::-webkit-media-controls { display: none !important; }
+      video::-webkit-media-controls-enclosure { display: none !important; }
+
+      /* EzyCourse / iSkills controls & overlays */
+      ._video_control_bar,
+      [class*="course_player_controls" i],
+      [class*="video_controls" i],
+      [class*="control_bar" i],
+      [class*="controlBar" i],
+      [class*="player_control" i],
+      [class*="playerControl" i],
+
+      /* Plyr */
       .plyr__controls,
       .plyr__control,
       .plyr__poster,
+      .plyr__captions,
+
+      /* Video.js */
       .vjs-control-bar,
       .vjs-loading-spinner,
       .vjs-big-play-button,
       .vjs-poster,
       .vjs-text-track-display,
       .vjs-overlay,
-      [class*="watermark"],
-      [class*="Watermark"],
-      [class*="logo-container"],
-      [class*="player-overlay"],
-      [class*="bmpui"],
+
+      /* BunnyCDN & Bitmovin UI */
       .bmpui-ui-uicontainer,
       .bmpui-controlbar,
       .bmpui-ui-watermark,
@@ -133,27 +172,28 @@
       .bmpui-ui-recommendation-overlay,
       .bmpui-ui-settings-panel,
       .bmpui-ui-controlbar,
-      div[class*="ControlBar"],
-      div[class*="overlay"],
-      div[class*="Overlay"]:not(video),
-      /* Generic player UI patterns */
-      .player-controls,
-      .video-controls,
-      .controls-wrapper,
-      .bottom-controls,
-      .top-controls,
-      /* BunnyCDN specific */
       #player-overlay,
       .bunnyCdnPlayer__controls,
-      [data-testid="player-controls"],
       .bunnyCdnPlayer__watermark,
       .bunnyCdnPlayer__loading,
-      /* Cursor on video area */
+      [data-testid="player-controls"],
+
+      /* Common generic player UI */
+      [class*="watermark" i],
+      [class*="Watermark" i],
+      [class*="logo-container" i],
+      [class*="player-overlay" i],
+      [class*="player-controls" i],
+      [class*="video-controls" i],
+      [class*="controls-wrapper" i],
+      [class*="bottom-controls" i],
+      [class*="top-controls" i],
+
+      /* Hide cursor on video during recording */
       video { cursor: none !important; }
     `;
     document.head.append(style);
 
-    // Also try to remove cursor from the player container
     const container = video?.closest('[class*="player"]') || video?.parentElement;
     if (container) container.style.cursor = 'none';
 
@@ -172,7 +212,7 @@
   /* ── Choose the largest video element ───────────────────────── */
   function choose() {
     const candidate = [...document.querySelectorAll('video')]
-      .filter(v => v.getBoundingClientRect().width > 100)
+      .filter(v => v.getBoundingClientRect().width > 80 || v.videoWidth > 0)
       .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
 
     if (candidate === video) return;
@@ -202,6 +242,9 @@
     autoPlay();
     hidePlayerControls();
     send('attached');
+
+    // Notify background to ensure page preparation if dynamic DOM
+    chrome.runtime.sendMessage({ type: 'ensure-prepare' }).catch(() => {});
   }
 
   /* ── DOM observer + heartbeat ───────────────────────────────── */
@@ -212,18 +255,49 @@
   /* ── Message handler ────────────────────────────────────────── */
   const message = (msg, _sender, respond) => {
     if (msg.type === 'find-frame') {
-      const wanted = new URL(msg.url);
-      const iframe = [...document.querySelectorAll('iframe')].find(el => {
-        try {
-          const u = new URL(el.src);
-          return u.origin === wanted.origin && u.pathname === wanted.pathname;
-        } catch { return false; }
-      });
-      if (!iframe) { respond(null); return; }
+      let wanted = null;
+      try { wanted = new URL(msg.url); } catch (_) {}
+
+      const iframes = [...document.querySelectorAll('iframe')];
+      let iframe = null;
+
+      // Match iframe by exact src or origin/pathname
+      if (wanted) {
+        iframe = iframes.find(el => {
+          try {
+            const u = new URL(el.src);
+            return u.origin === wanted.origin && u.pathname === wanted.pathname;
+          } catch { return false; }
+        }) || iframes.find(el => {
+          try {
+            const u = new URL(el.src);
+            return u.origin === wanted.origin;
+          } catch { return false; }
+        });
+      }
+
+      // Fallback: previously marked iframe or largest visible iframe
+      if (!iframe) {
+        iframe = document.querySelector('iframe[data-frame-recorder]') ||
+                 iframes.find(el => el.clientWidth >= 300 && el.clientHeight >= 180) ||
+                 iframes[0];
+      }
+
+      if (!iframe) {
+        // Safe viewport fallback
+        respond({
+          x: 0, y: 0, width: innerWidth, height: innerHeight,
+          viewport: { width: innerWidth, height: innerHeight }
+        });
+        return;
+      }
+
       const r = iframe.getBoundingClientRect();
       respond({
-        x: r.x + iframe.clientLeft, y: r.y + iframe.clientTop,
-        width: iframe.clientWidth, height: iframe.clientHeight,
+        x: r.x + iframe.clientLeft,
+        y: r.y + iframe.clientTop,
+        width: iframe.clientWidth || r.width,
+        height: iframe.clientHeight || r.height,
         viewport: { width: innerWidth, height: innerHeight }
       });
     }

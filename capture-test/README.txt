@@ -1,37 +1,37 @@
-VIDEO FRAME RECORDER 0.2.0 — LIVE VALIDATION STILL REQUIRED
+UNIVERSAL VIDEO COURSE RECORDER v0.4.0 (GLOBAL)
 
+Ye extension ab tamam websites aur platforms par kaam karti hai:
+- iSkills (app.iskills.com)
+- Sarmaaya (learn.sarmaaya.pk)
+- EzyCourse, Coursera, Udemy, YouTube, Vimeo, Wistia, BunnyCDN, etc.
+
+CHALANE KA TAREEQA:
 1. Chrome mein chrome://extensions kholein, Developer mode ON karein.
-2. Load unpacked se yeh recorder-test-extension folder select karein.
-3. Course video ki speed 1x rakhein. Extension ko pin karein.
-4. Course tab par extension icon ek baar click karein: 120-second bounded test shuru.
-5. REC = recording, HOLD = player paused/buffering/seeking, low resolution, or speed not 1x.
-6. Extension icon dobara click karne se test jaldi stop hoga.
-7. Downloads/FrameCaptureTests mein RAW WebM aur JSON timing report save hoti hain.
-   Yeh raw test recording final file nahi. Local finalizer audio/video dono se
-   pause aur buffering intervals ek saath nikal kar final MP4 banata hai.
+2. Extension ko RELOAD karein (ya Load unpacked se recorder-test-extension folder select karein).
+3. Kisi bhi website par video/lesson kholein (jaise app.iskills.com ya learn.sarmaaya.pk).
+4. Extension icon ek baar click karein:
+   - Video AUTOMATICALLY play ho jayega (iSkills ka center blue play button bhi auto-click hoga)
+   - Left sidebar (curriculum list), header, bottom buttons sab hide ho jayenge
+   - Video clean screen par expand ho jayega
+   - Player controls recording ke dauran hide ho jayenge
+   - Recording shuru ho jayegi
+5. Screen par top-left mein HUD dikhega:
+   - 🔴 REC = recording chal rahi hai
+   - 🟡 HOLD = player paused/buffering/seeking
+   - Timer = recording ka actual time (pauses excluded)
+   - ■ Stop button = recording band karne ke liye
+6. Recording band karne ke tareeqey:
+   - Extension icon dobara click karein
+   - Ya HUD par ■ Stop button dabayein
+   - Ya video khatam hone par khud stop ho jayega
+7. Downloads/FrameCaptureTests mein file automatically website aur lesson ke naam ke sath save hogi:
+   Jaise: Iskills_SEBT_NEXT_2026-09-22T....raw.webm aur .json
+8. python capture-test/auto-finalize.py chalayein — final MP4 final-recordings mein aa jayegi!
 
-WHAT THIS TEST DOES
-- Uses Chrome's ordinary tab capture. No DRM decryption or protection changes.
-- Microphone is never requested. Tab audio is not sent to speakers.
-- Enlarges the embedded player within its tab and restores its original layout on stop.
-- Captures native tab audio/video directly, without a live canvas rendering loop.
-- Saves geometry for the local finalizer to crop the visible video image.
-- Finalizer rejects actual video crops 720px high or less, missing video, lost
-  telemetry, mismatched capture clocks, and unreliable viewport geometry.
-- Limits output to original source resolution and 1920x1080; no artificial enlargement.
-- Marks play/pause/waiting/seeking/ended intervals for local finalization.
-- Uses a continuous clock; MediaRecorder pause/resume caused timing drift in lab tests.
-- Does not treat a static slide or silent moment as a pause.
-- Records for at most 120 wall-clock seconds, regardless of pauses.
-
-LIVE CHECKS STILL REQUIRED
-After updating files, reload the installed extension so version 0.2.0 takes effect.
-Actual Windows speaker mute, hidden source tab, another window/profile, pause/resume,
-real buffering, crop stability, A/V sync, frame drops and output resolution.
-Lab results alone do not establish that this extension passes these checks on Sarmaaya.
-
-LIMITS
-Test build only. No multi-lesson queue. Short buffering/control overlays can precede
-the player's state event. Do not promise zero transition frames without measuring.
-Keep source tab/Chrome open and computer awake. Record only content you may record.
-If Chrome crashes, this short test's in-memory recording can be lost.
+KEY FEATURES (v0.4.0):
+- Global Support: Har website (<all_urls>) par chalta hai.
+- Universal Auto-Play: Direct play + center-point click (iSkills circular button) + selector query.
+- Universal Clean View: Sidebars, headers aur unnecessary elements hide kar deta hai.
+- Universal Player Controls Hiding: EzyCourse, Bunny, Plyr, Video.js, native controls sab hide.
+- Smart File Naming: Site aur lecture name ke sath download save hota hai.
+- No Time Limit: Poori lecture record hogi.

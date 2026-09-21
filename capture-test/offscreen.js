@@ -47,20 +47,22 @@ async function start(streamId) {
     }
   });
 
-  if (!raw.getAudioTracks().length) throw Error('No internal tab audio track.');
+  const hasAudio = raw.getAudioTracks().length > 0;
   captureSettings = raw.getVideoTracks()[0].getSettings();
 
   // Prefer VP9 for better quality at same bitrate, fallback to VP8
   const mime = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus'
+    ...(hasAudio ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus'] : []),
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm'
   ].find(x => MediaRecorder.isTypeSupported(x));
   if (!mime) throw Error('No supported recording codec.');
 
   recorder = new MediaRecorder(raw, {
     mimeType: mime,
     videoBitsPerSecond: 8_000_000,   // 8Mbps for sharp text/slides
-    audioBitsPerSecond: 128_000
+    ...(hasAudio ? { audioBitsPerSecond: 128_000 } : {})
   });
 
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); update(); };
@@ -94,7 +96,7 @@ async function save() {
   raw?.getTracks().forEach(t => t.stop());
 
   const report = {
-    testBuild: '0.3.0',
+    testBuild: '0.4.0',
     strategy: 'continuous-capture-then-trim',
     cropAfterCapture: true,
     stopReason,

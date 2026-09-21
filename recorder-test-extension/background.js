@@ -16,7 +16,7 @@ async function reportFailure(error, stage = 'startup') {
   const detail = error?.message || String(error);
   badgeErr();
   await chrome.action.setTitle({ title: 'Recording error: ' + detail });
-  const report = { build: '0.3.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
+  const report = { build: '0.4.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
   await chrome.storage.local.set({ lastError: detail, lastFailure: report });
   const name = 'FrameCaptureTests/error-' + report.at.replace(/[:.]/g, '-') + '.json';
   try {
@@ -29,67 +29,139 @@ async function reportFailure(error, stage = 'startup') {
   }
 }
 
-/* ── Prepare: fullscreen iframe + hide page chrome ─────────────── */
+/* ── Prepare: fullscreen video or iframe + hide page chrome ─────── */
 async function prepare(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, func: () => {
-    const frame = [...document.querySelectorAll('iframe')].find(e => {
-      try { return new URL(e.src).hostname === 'iframe.mediadelivery.net'; } catch { return false; }
-    });
-    if (frame && !document.getElementById('frame-recorder-restore')) {
-      // Save original state for restoration
-      const marker = document.createElement('script');
-      marker.type = 'application/json';
-      marker.id = 'frame-recorder-restore';
-      marker.textContent = JSON.stringify({
-        style: frame.getAttribute('style'),
-        bodyOverflow: document.body.style.overflow,
-        htmlOverflow: document.documentElement.style.overflow
+    if (document.getElementById('frame-recorder-restore')) return;
+
+    // Helper to find video element or player container or iframe
+    function findTarget() {
+      // 1. Check for known video provider iframes (BunnyCDN, Vimeo, YouTube, Wistia, etc.)
+      const iframes = [...document.querySelectorAll('iframe')];
+      const videoIframe = iframes.find(e => {
+        try {
+          const h = new URL(e.src).hostname.toLowerCase();
+          return (
+            h.includes('mediadelivery.net') ||
+            h.includes('bunny') ||
+            h.includes('vimeo') ||
+            h.includes('youtube') ||
+            h.includes('wistia') ||
+            h.includes('cloudflarestream') ||
+            h.includes('loom.com') ||
+            h.includes('stream') ||
+            h.includes('player')
+          );
+        } catch { return false; }
       });
-      frame.dataset.frameRecorder = 'true';
-      document.documentElement.append(marker);
+      if (videoIframe) return videoIframe;
 
-      // Make iframe fill the entire viewport
-      frame.style.cssText += `;
-        position: fixed !important;
-        inset: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: none !important;
-        max-height: none !important;
-        z-index: 2147483647 !important;
-        border: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-      `;
-      document.body.style.overflow = 'hidden';
-      document.documentElement.style.overflow = 'hidden';
-
-      // Hide all page chrome — make iframe's entire parent chain visible
-      // while hiding everything else. Can't use `body > *` because the
-      // iframe is nested deep inside divs, not a direct child of body.
-      const overlay = document.createElement('style');
-      overlay.id = 'frame-recorder-hide-chrome';
-      overlay.textContent = `
-        body { margin: 0 !important; padding: 0 !important; background: #000 !important; }
-        html { scrollbar-width: none !important; background: #000 !important; }
-        html::-webkit-scrollbar { display: none !important; }
-        /* Hide everything by default */
-        body * { visibility: hidden !important; }
-        /* Force the iframe and its content visible */
-        iframe[data-frame-recorder],
-        iframe[data-frame-recorder] * { visibility: visible !important; }
-        /* Keep our own UI visible */
-        #frame-recorder-hud, #frame-recorder-hud * { visibility: visible !important; }
-      `;
-      document.head.append(overlay);
-
-      // Walk up the iframe's parent chain and force each ancestor visible
-      let el = frame.parentElement;
-      while (el && el !== document.documentElement) {
-        el.style.setProperty('visibility', 'visible', 'important');
-        el.dataset.frameRecorderChain = 'true';
-        el = el.parentElement;
+      // 2. Check for any iframe containing a video tag (same-origin)
+      for (const f of iframes) {
+        try {
+          if (f.contentDocument && f.contentDocument.querySelector('video')) {
+            return f;
+          }
+        } catch (_) {}
       }
+
+      // 3. Check for direct <video> elements on the page (largest visible video)
+      const videos = [...document.querySelectorAll('video')]
+        .filter(v => {
+          const r = v.getBoundingClientRect();
+          return (r.width > 120 && r.height > 80) || v.videoWidth > 0;
+        })
+        .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
+
+      if (videos.length > 0) {
+        const v = videos[0];
+        // Find player wrapper container if available, otherwise the video itself
+        const wrapper = v.closest(
+          '.video-js, .plyr, [class*="player-wrapper" i], [class*="player_wrapper" i], ' +
+          '[class*="video-player" i], [class*="video_player" i], [class*="player-container" i], ' +
+          '[class*="playerContainer" i], [class*="course_player" i], [class*="player" i], [id*="player" i]'
+        );
+        return wrapper || v;
+      }
+
+      // 4. Fallback: find any substantial iframe (at least 300x180)
+      const largeIframe = iframes
+        .filter(f => {
+          const r = f.getBoundingClientRect();
+          return r.width >= 300 && r.height >= 180;
+        })
+        .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
+
+      if (largeIframe) return largeIframe;
+
+      return null;
+    }
+
+    const target = findTarget();
+    if (!target) return;
+
+    // Save original state for clean restoration
+    const marker = document.createElement('script');
+    marker.type = 'application/json';
+    marker.id = 'frame-recorder-restore';
+    marker.textContent = JSON.stringify({
+      targetStyle: target.getAttribute('style'),
+      bodyOverflow: document.body.style.overflow,
+      htmlOverflow: document.documentElement.style.overflow,
+      bodyMargin: document.body.style.margin,
+      bodyBg: document.body.style.backgroundColor
+    });
+    target.dataset.frameRecorder = 'true';
+    document.documentElement.append(marker);
+
+    // Make target element fill the entire viewport
+    target.style.cssText += `;
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      z-index: 2147483645 !important;
+      border: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #000 !important;
+    `;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    // Hide all page chrome (headers, sidebars, curriculum panels, action buttons)
+    const overlay = document.createElement('style');
+    overlay.id = 'frame-recorder-hide-chrome';
+    overlay.textContent = `
+      body { margin: 0 !important; padding: 0 !important; background: #000 !important; }
+      html { scrollbar-width: none !important; background: #000 !important; }
+      html::-webkit-scrollbar { display: none !important; }
+      /* Hide everything by default */
+      body * { visibility: hidden !important; }
+      /* Force target element and its contents visible */
+      [data-frame-recorder],
+      [data-frame-recorder] * { visibility: visible !important; }
+      /* Ensure nested video fills container */
+      [data-frame-recorder] video {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        object-fit: contain !important;
+      }
+      /* Keep HUD visible */
+      #frame-recorder-hud, #frame-recorder-hud * { visibility: visible !important; }
+    `;
+    document.head.append(overlay);
+
+    // Walk up the parent chain and force each ancestor visible
+    let el = target.parentElement;
+    while (el && el !== document.documentElement) {
+      el.style.setProperty('visibility', 'visible', 'important');
+      el.dataset.frameRecorderChain = 'true';
+      el = el.parentElement;
     }
   }});
 }
@@ -97,16 +169,20 @@ async function prepare(tabId) {
 /* ── Cleanup: restore page state ──────────────────────────────── */
 async function cleanup(tabId) {
   await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
-    // Restore iframe and page in main frame
+    // Restore target element in main frame
     const marker = document.getElementById('frame-recorder-restore');
-    const frame = document.querySelector('[data-frame-recorder]');
-    if (marker && frame) {
-      const old = JSON.parse(marker.textContent);
-      if (old.style === null) frame.removeAttribute('style');
-      else frame.setAttribute('style', old.style);
-      delete frame.dataset.frameRecorder;
-      document.body.style.overflow = old.bodyOverflow;
-      document.documentElement.style.overflow = old.htmlOverflow || '';
+    const target = document.querySelector('[data-frame-recorder]');
+    if (marker && target) {
+      try {
+        const old = JSON.parse(marker.textContent);
+        if (old.targetStyle === null) target.removeAttribute('style');
+        else target.setAttribute('style', old.targetStyle);
+        document.body.style.overflow = old.bodyOverflow || '';
+        document.documentElement.style.overflow = old.htmlOverflow || '';
+        if (old.bodyMargin !== undefined) document.body.style.margin = old.bodyMargin;
+        if (old.bodyBg !== undefined) document.body.style.backgroundColor = old.bodyBg;
+      } catch (_) {}
+      delete target.dataset.frameRecorder;
       marker.remove();
     }
     // Remove page-chrome-hiding style
@@ -141,17 +217,33 @@ chrome.action.onClicked.addListener(async tab => {
       await chrome.storage.session.remove('testSession');
     }
 
-    // Validate tab
-    if (!tab.id || !/^https:\/\/(learn\.sarmaaya\.pk|iframe\.mediadelivery\.net)\//.test(tab.url || ''))
-      throw Error('Open the course video tab first.');
+    // Validate tab: allow any http or https web page
+    if (!tab.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
+      throw Error('Please open a website with a video lesson first.');
+    }
+
+    // Generate intelligent file prefix from site domain and page title
+    let siteName = 'Video';
+    try {
+      const host = new URL(tab.url).hostname.replace(/^www\./, '').split('.')[0];
+      if (host) siteName = host.charAt(0).toUpperCase() + host.slice(1);
+    } catch (_) {}
+
+    const cleanTitle = (tab.title || 'Lecture')
+      .replace(/[^\w\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .slice(0, 40);
+
+    const filePrefix = `${siteName}_${cleanTitle || 'Lecture'}`;
 
     // Start new session
-    session = { tabId: tab.id, frameId: null, started: Date.now() };
+    session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix };
     await chrome.storage.session.set({ testSession: session });
     badgeWait();
     await chrome.action.setTitle({ title: 'Preparing recording...' });
 
-    // Fullscreen iframe + hide page chrome
+    // Fullscreen video/iframe + hide page chrome
     await prepare(tab.id);
 
     // Create offscreen document for recording
@@ -168,7 +260,7 @@ chrome.action.onClicked.addListener(async tab => {
     const startResult = await chrome.runtime.sendMessage({ to: 'recorder', type: 'start', streamId });
     if (startResult?.error) throw Error(startResult.error);
 
-    // Inject monitor (auto-play, hide controls) and HUD into all frames
+    // Inject monitor (auto-play, hide player controls) into all frames and HUD into top frame
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['monitor.js'] });
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['hud.js'] });
 
@@ -198,18 +290,28 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
       // Remap coordinates if video is inside a nested iframe
       if (sender.frameId !== 0) {
-        const parent = await chrome.tabs.sendMessage(session.tabId, { type: 'find-frame', url: sender.url }, { frameId: 0 });
-        if (!parent) throw Error('Nested video frame cannot be located safely.');
-        const sx = parent.width / data.viewport.width, sy = parent.height / data.viewport.height;
-        data.rect = {
-          x: parent.x + data.rect.x * sx,
-          y: parent.y + data.rect.y * sy,
-          width: data.rect.width * sx,
-          height: data.rect.height * sy
-        };
-        data.viewport = parent.viewport;
+        let parent = null;
+        try {
+          parent = await chrome.tabs.sendMessage(session.tabId, { type: 'find-frame', url: sender.url }, { frameId: 0 });
+        } catch (_) {}
+
+        if (parent && parent.width && parent.height) {
+          const sx = parent.width / data.viewport.width, sy = parent.height / data.viewport.height;
+          data.rect = {
+            x: parent.x + data.rect.x * sx,
+            y: parent.y + data.rect.y * sy,
+            width: data.rect.width * sx,
+            height: data.rect.height * sy
+          };
+          data.viewport = parent.viewport;
+        }
       }
       await chrome.runtime.sendMessage({ to: 'recorder', type: 'state', data });
+    }
+
+    /* Request to ensure page is prepared if video attached late */
+    if (msg.type === 'ensure-prepare' && session && sender.tab?.id === session.tabId) {
+      await prepare(session.tabId);
     }
 
     /* Recorder status updates */
@@ -235,7 +337,9 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
     /* Save completed recording — sequenced downloads to avoid Chrome suppression */
     if (msg.type === 'save-test' && !sender.tab) {
-      const base = 'FrameCaptureTests/' + msg.name;
+      const prefix = session?.filePrefix || 'Video';
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const base = `FrameCaptureTests/${prefix}_${timestamp}`;
       let error = null;
       try {
         // Download WebM first, then JSON report sequentially

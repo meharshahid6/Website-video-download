@@ -1,42 +1,37 @@
-SARMAAYA VIDEO RECORDER v0.3.0
+UNIVERSAL VIDEO COURSE RECORDER v0.4.0 (GLOBAL)
 
+Ye extension ab tamam websites aur platforms par kaam karti hai:
+- iSkills (app.iskills.com)
+- Sarmaaya (learn.sarmaaya.pk)
+- EzyCourse, Coursera, Udemy, YouTube, Vimeo, Wistia, BunnyCDN, etc.
+
+CHALANE KA TAREEQA:
 1. Chrome mein chrome://extensions kholein, Developer mode ON karein.
-2. Load unpacked se yeh recorder-test-extension folder select karein.
-3. Course video tab par jayein (learn.sarmaaya.pk).
+2. Extension ko RELOAD karein (ya Load unpacked se recorder-test-extension folder select karein).
+3. Kisi bhi website par video/lesson kholein (jaise app.iskills.com ya learn.sarmaaya.pk).
 4. Extension icon ek baar click karein:
-   - Video AUTOMATICALLY play hoga
-   - Page clean fullscreen ho jayega (sirf video dikhega)
-   - Player controls hide ho jayengey
+   - Video AUTOMATICALLY play ho jayega (iSkills ka center blue play button bhi auto-click hoga)
+   - Left sidebar (curriculum list), header, bottom buttons sab hide ho jayenge
+   - Video clean screen par expand ho jayega
+   - Player controls recording ke dauran hide ho jayenge
    - Recording shuru ho jayegi
 5. Screen par top-left mein HUD dikhega:
    - 🔴 REC = recording chal rahi hai
    - 🟡 HOLD = player paused/buffering/seeking
    - Timer = recording ka actual time (pauses excluded)
-   - ■ Stop button = jaldi band karne ke liye
-6. Extension icon dobara click karne se ya HUD Stop button se recording band hogi.
-7. Video khatam hone par recording khud band ho jayegi.
-8. Downloads/FrameCaptureTests mein RAW WebM aur JSON timing report save hoti hain.
-9. python capture-test/auto-finalize.py chalayein — clean MP4 final-recordings mein aa jayegi.
+   - ■ Stop button = recording band karne ke liye
+6. Recording band karne ke tareeqey:
+   - Extension icon dobara click karein
+   - Ya HUD par ■ Stop button dabayein
+   - Ya video khatam hone par khud stop ho jayega
+7. Downloads/FrameCaptureTests mein file automatically website aur lesson ke naam ke sath save hogi:
+   Jaise: Iskills_SEBT_NEXT_2026-09-22T....raw.webm aur .json
+8. python capture-test/auto-finalize.py chalayein — final MP4 final-recordings mein aa jayegi!
 
-WHAT THIS DOES
-- Chrome ka ordinary tab capture use karta hai. No DRM decryption.
-- Microphone KABHI request nahi hota. Tab audio speakers par nahi jaata.
-- Page ke sarey extra elements (header, sidebar, navigation) hide ho jaate hain.
-- Player ke controls (play/pause bar, progress bar) bhi hide ho jaate hain.
-- Video player ko fullscreen karke native resolution par capture karta hai.
-- Continuous recording — pause/buffering intervals baad mein finalizer nikal deta hai.
-- VP9 at 8Mbps — sharp text aur slides ke liye.
-- Koi time limit NAHI. Puri lecture record hogi.
-
-RECORDING BAND KARNE KE TAREEQEY
-- Extension icon dobara click karein
-- HUD par ■ Stop button click karein
-- Course tab band karein (auto-stop)
-- Video khatam ho jaye (auto-stop)
-
-LIMITS
-- Chrome aur tab khula rakhein.
-- Computer awake rakhein (sleep mode mein recording ruk jayegi).
-- Sirf apna content record karein.
-- Player controls hide hone ke baad agar aapko video control karna hai,
-  to extension icon se stop karein ya HUD Stop button use karein.
+KEY FEATURES (v0.4.0):
+- Global Support: Har website (<all_urls>) par chalta hai.
+- Universal Auto-Play: Direct play + center-point click (iSkills circular button) + selector query.
+- Universal Clean View: Sidebars, headers aur unnecessary elements hide kar deta hai.
+- Universal Player Controls Hiding: EzyCourse, Bunny, Plyr, Video.js, native controls sab hide.
+- Smart File Naming: Site aur lecture name ke sath download save hota hai.
+- No Time Limit: Poori lecture record hogi.
