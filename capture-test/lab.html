@@ -1,0 +1,51 @@
+<!doctype html><meta charset="utf-8"><title>Recorder logic lab</title>
+<style>body{font:18px system-ui;background:#182131;color:#fff;margin:32px}button{padding:14px}video{width:600px;display:block}pre{white-space:pre-wrap}canvas{display:none}</style>
+<h1>Recorder logic lab</h1><p>Local recorded-file test only. This does not verify live tab capture, Windows speaker mute or DRM.</p>
+<button id="run">Run pause and real buffering tests</button><pre id="status">Ready</pre><video muted playsinline></video><canvas></canvas>
+<script type="module">
+import {gate,cropPixels,nativeOutput} from './common.js';
+const button=document.querySelector('button'),label=document.querySelector('pre'),video=document.querySelector('video'),canvas=document.querySelector('canvas');
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+const until=(check,ms=15000)=>new Promise((resolve,reject)=>{const begun=Date.now(),t=setInterval(()=>{if(check()){clearInterval(t);resolve()}else if(Date.now()-begun>ms){clearInterval(t);reject(Error('Timed out'))}},50)});
+button.onclick=async()=>{
+button.disabled=true;
+try{
+ const base={paused:false,ended:false,seeking:false,waiting:false,readyState:4,playbackRate:1};
+ const checks=[gate(base)==='recording',gate({...base,paused:true})==='paused',gate({...base,waiting:true})==='buffering',gate({...base,readyState:2})==='buffering',gate({...base,seeking:true})==='seeking',gate({...base,playbackRate:1.5})==='set-playback-speed-to-1x'];
+ const c=cropPixels({x:100,y:50,width:1280,height:720},{width:1536,height:864},1920,1080);
+ checks.push(c.width===1600&&c.height===900,nativeOutput(c,1920,1080).height===900,nativeOutput(c,1280,720).height===720);
+ if(checks.some(x=>!x))throw Error('Geometry/state assertions failed');
+ const results=[];
+ for(const id of ['pause','buffering']){
+  label.textContent='Running '+id+' test...';
+  let waiting=false,recorder=null,output,timer,drawn=0,lastStatus='',events=[],chunks=[];
+  const begun=Date.now();let activeMs=0,lastTick=begun,recordingStarted=0;
+  const update=event=>{if(event.type==='waiting')waiting=true;if(event.type==='playing')waiting=false;};
+  const names=['waiting','playing'];names.forEach(n=>video.addEventListener(n,update));
+  video.src='/fixture.webm'+(id==='buffering'?'?stall='+Date.now():'?normal='+Date.now());video.load();
+  await video.play();
+  await until(()=>video.readyState>=2);
+  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  const ctx=canvas.getContext('2d');ctx.drawImage(video,0,0);
+  const direct=video.captureStream();await until(()=>direct.getAudioTracks().length>0);
+  const picture=canvas.captureStream(0);output=new MediaStream([...picture.getVideoTracks(),...direct.getAudioTracks()]);
+  recorder=new MediaRecorder(output,{mimeType:'video/webm;codecs=vp9,opus',videoBitsPerSecond:4000000});recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  recorder.start(500);lastTick=Date.now();recordingStarted=lastTick;
+  timer=setInterval(()=>{
+    const now=Date.now();if(lastStatus==='recording')activeMs+=now-lastTick;lastTick=now;
+    const state=gate({paused:video.paused,ended:video.ended,seeking:video.seeking,waiting,readyState:video.readyState,playbackRate:video.playbackRate});
+    if(state!==lastStatus){events.push({wallMs:now-begun,captureMs:now-recordingStarted,state,sourceTime:video.currentTime});lastStatus=state;}
+    ctx.drawImage(video,0,0);picture.getVideoTracks()[0].requestFrame();drawn++;
+  },33);
+  if(id==='pause'){await until(()=>video.currentTime>=2);video.pause();await delay(2000);await video.play();}
+  await until(()=>video.currentTime>=7,20000);
+  clearInterval(timer);const stopped=new Promise(r=>recorder.onstop=r);recorder.stop();await stopped;
+  const report={id,strategy:'continuous-capture-then-trim',geometryChecks:checks.length,wallSeconds:(Date.now()-begun)/1000,captureSeconds:(Date.now()-recordingStarted)/1000,activeSeconds:activeMs/1000,drawn,events,resolution:[canvas.width,canvas.height],audioTracks:output.getAudioTracks().length};
+  video.pause();names.forEach(n=>video.removeEventListener(n,update));output.getTracks().forEach(t=>t.stop());
+  await fetch('/result?id='+id+'&kind=webm',{method:'POST',body:new Blob(chunks,{type:'video/webm'})});
+  await fetch('/result?id='+id+'&kind=json',{method:'POST',body:JSON.stringify(report,null,2)});results.push(report);
+ }
+ label.textContent='COMPLETE\n'+JSON.stringify(results,null,2);
+}catch(e){label.textContent='FAILED: '+e.message;video.pause();}finally{button.disabled=false;}
+};
+</script>

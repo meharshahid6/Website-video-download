@@ -1,0 +1,17 @@
+{
+  "source": "C:\\Users\\Shahid\\Documents\\Website video download\\capture-test\\lab-pause.webm",
+  "output": "C:\\Users\\Shahid\\Documents\\Website video download\\capture-test\\lab-pause-final.mp4",
+  "keptIntervals": [
+    [
+      0.035,
+      1.991
+    ],
+    [
+      3.995,
+      8.979
+    ]
+  ],
+  "keptSeconds": 6.94,
+  "removedSeconds": 2.038999999999999,
+  "note": "Same source-time cuts applied to both tracks; subjective lip-sync and live background capture still require checks."
+}

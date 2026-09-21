@@ -1,0 +1,34 @@
+{
+  "id": "pause",
+  "strategy": "continuous-capture-then-trim",
+  "geometryChecks": 9,
+  "wallSeconds": 9.148,
+  "captureSeconds": 8.979,
+  "activeSeconds": 6.938,
+  "drawn": 216,
+  "events": [
+    {
+      "wallMs": 204,
+      "captureMs": 35,
+      "state": "recording",
+      "sourceTime": 0.105701
+    },
+    {
+      "wallMs": 2160,
+      "captureMs": 1991,
+      "state": "paused",
+      "sourceTime": 2.031631
+    },
+    {
+      "wallMs": 4164,
+      "captureMs": 3995,
+      "state": "recording",
+      "sourceTime": 2.106283
+    }
+  ],
+  "resolution": [
+    1920,
+    808
+  ],
+  "audioTracks": 1
+}

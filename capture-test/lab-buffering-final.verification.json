@@ -1,0 +1,17 @@
+{
+  "source": "C:\\Users\\Shahid\\Documents\\Website video download\\capture-test\\lab-buffering.webm",
+  "output": "C:\\Users\\Shahid\\Documents\\Website video download\\capture-test\\lab-buffering-final.mp4",
+  "keptIntervals": [
+    [
+      0.035,
+      4.369
+    ],
+    [
+      8.812,
+      11.42
+    ]
+  ],
+  "keptSeconds": 6.942,
+  "removedSeconds": 4.515000000000001,
+  "note": "Same source-time cuts applied to both tracks; subjective lip-sync and live background capture still require checks."
+}

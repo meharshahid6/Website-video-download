@@ -1,0 +1,5 @@
+{
+  "source": "C:\\Users\\Shahid\\Downloads\\FrameCaptureTests\\test-2026-09-21T18-29-52-880Z.raw.webm",
+  "error": "Capture failed: insufficient video/audio frames; a new capture is required.",
+  "status": "capture-needs-attention"
+}

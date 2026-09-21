@@ -1,0 +1,39 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>30-second video capture test</title>
+<style>body{font:18px system-ui;background:#101827;color:#eef3ff;max-width:900px;margin:50px auto;padding:24px}button,a{padding:12px 20px;margin:6px;border-radius:8px}button{cursor:pointer}video{width:100%;max-height:440px;background:#000}pre{white-space:pre-wrap}a{color:#8fd7ff}small{color:#bac6d8}</style>
+<h1>30-second video capture test</h1>
+<p>Chrome Tab mein course video chunein aur <b>Share tab audio</b> ON rakhein. Microphone use nahi hoga. Sirf chuna hua tab record hoga.</p>
+<p>Video play rakhein. Recording shuru hone ke baad doosri tab par ja sakte hain. Yeh test poora selected tab capture karta hai; cropping aur auto-pause abhi shamil nahi.</p>
+<button id="start">Choose video tab & start test</button><button id="stop" disabled>Stop & save</button>
+<pre id="status">Ready — no recording started.</pre><video id="preview" controls muted playsinline></video><p><a id="download" hidden>Download test recording</a></p>
+<small>Recording isi computer par save hoti hai. Koi external upload nahi. Test page khula rakhein.</small>
+<script>
+const start=document.querySelector('#start'),stop=document.querySelector('#stop'),status=document.querySelector('#status'),preview=document.querySelector('#preview'),download=document.querySelector('#download');
+let stream,recorder,timer,ticker,context,oldUrl;
+function finish(){if(recorder&&recorder.state!=='inactive')recorder.stop();}
+start.onclick=async()=>{
+  start.disabled=true; download.hidden=true; let chunks=[]; let peak=0;
+  try{
+    stream=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30},audio:{suppressLocalAudioPlayback:true},selfBrowserSurface:'exclude',systemAudio:'exclude',surfaceSwitching:'exclude',monitorTypeSurfaces:'exclude'});
+    if(stream.getVideoTracks()[0].getSettings().displaySurface!=='browser')throw Error('Please select Chrome Tab, not a window or entire screen.');
+    if(!stream.getAudioTracks().length)throw Error('Tab audio nahi mili. Dobara Share tab audio ON karke select karein.');
+    context=new AudioContext();await context.resume();const analyser=context.createAnalyser();analyser.fftSize=2048;
+    context.createMediaStreamSource(stream).connect(analyser);const samples=new Float32Array(analyser.fftSize);
+    const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));
+    if(!mime)throw Error('Supported WebM recorder unavailable.');
+    recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:3000000});
+    recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+    recorder.onstop=async()=>{
+      clearTimeout(timer);clearInterval(ticker);stop.disabled=true;stream.getTracks().forEach(t=>t.stop());await context.close();
+      const blob=new Blob(chunks,{type:mime});preview.srcObject=null;if(oldUrl)URL.revokeObjectURL(oldUrl);oldUrl=URL.createObjectURL(blob);preview.src=oldUrl;
+      download.href=oldUrl;download.download='capture-test.webm';download.hidden=false;
+      status.textContent='Recording complete. Saving locally...';
+      try{const r=await fetch('/recording',{method:'POST',headers:{'Content-Type':'video/webm'},body:blob});if(!r.ok)throw Error('Save failed');const saved=await r.json();status.textContent='SAVED: '+saved.name+'\nBytes: '+saved.bytes+'\nAudio signal peak: '+peak.toFixed(5)+'\nPicture aur awaaz ko playback se verify karein; audio signal akela pass nahi hai.';}catch(e){status.textContent='Auto-save failed. Download test recording link se file save karein. '+e.message;}start.disabled=false;
+    };
+    recorder.onerror=e=>{status.textContent='Recorder error: '+(e.error?.message||'unknown');finish();};
+    preview.removeAttribute('src');preview.srcObject=stream;preview.muted=true;await preview.play();
+    stream.getVideoTracks()[0].onended=finish;recorder.start(1000);stop.disabled=false;const begun=Date.now();
+    ticker=setInterval(()=>{analyser.getFloatTimeDomainData(samples);for(const s of samples)peak=Math.max(peak,Math.abs(s));status.textContent='RECORDING: '+Math.floor((Date.now()-begun)/1000)+' / 30 seconds\nInternal audio track: present\nAudio peak: '+peak.toFixed(5);if(Date.now()-begun>=30000)finish();},250);
+    timer=setTimeout(finish,30000);
+  }catch(e){stream?.getTracks().forEach(t=>t.stop());if(context&&context.state!=='closed')await context.close();status.textContent='Test not started: '+e.message;start.disabled=false;}
+};stop.onclick=finish;
+</script></html>

@@ -1,0 +1,18 @@
+[
+  {
+    "file": "lab-buffering.webm",
+    "videoFrames": 143,
+    "videoEnd": 6.814,
+    "audioEnd": 6.978,
+    "maxVideoGap": 0.42900000000000005,
+    "audioRMSMean": 0.07089327250027826
+  },
+  {
+    "file": "lab-pause.webm",
+    "videoFrames": 101,
+    "videoEnd": 5.798,
+    "audioEnd": 7.153,
+    "maxVideoGap": 0.7279999999999998,
+    "audioRMSMean": 0.06982393382546546
+  }
+]

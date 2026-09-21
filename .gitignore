@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Verification binaries & sandbox tools
+capture-test/verification-tools/
+verification-tools/
+
+# Temporary / intermediate media
+*.pending.mp4
+*.pending.verification.json
+
+# System files
+Thumbs.db
+.DS_Store

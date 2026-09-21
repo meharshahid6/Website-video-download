@@ -1,0 +1,34 @@
+{
+  "id": "buffering",
+  "strategy": "continuous-capture-then-trim",
+  "geometryChecks": 9,
+  "wallSeconds": 11.766,
+  "captureSeconds": 11.457,
+  "activeSeconds": 6.976,
+  "drawn": 267,
+  "events": [
+    {
+      "wallMs": 344,
+      "captureMs": 35,
+      "state": "recording",
+      "sourceTime": 0.117559
+    },
+    {
+      "wallMs": 4678,
+      "captureMs": 4369,
+      "state": "buffering",
+      "sourceTime": 4.371103
+    },
+    {
+      "wallMs": 9121,
+      "captureMs": 8812,
+      "state": "recording",
+      "sourceTime": 4.414922
+    }
+  ],
+  "resolution": [
+    1920,
+    808
+  ],
+  "audioTracks": 1
+}

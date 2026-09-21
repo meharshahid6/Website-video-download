@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Video Frame Recorder — Test Build",
+  "version": "0.2.0",
+  "minimum_chrome_version": "116",
+  "description": "Bounded 120-second local test: video crop, tab audio, player pause and buffering signals.",
+  "permissions": ["activeTab", "tabCapture", "offscreen", "scripting", "downloads", "storage"],
+  "host_permissions": ["https://learn.sarmaaya.pk/*", "https://iframe.mediadelivery.net/*"],
+  "action": {"default_title": "Start / stop 120-second video recording test"},
+  "background": {"service_worker": "background.js", "type": "module"}
+}

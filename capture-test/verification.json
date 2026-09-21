@@ -1,0 +1,30 @@
+{
+  "file": "test-2026-09-21T05-07-16-301Z.webm",
+  "bytes": 5299443,
+  "streams": [
+    {
+      "type": "video",
+      "codec": "vp9"
+    },
+    {
+      "type": "audio",
+      "codec": "opus"
+    }
+  ],
+  "resolution": [
+    1920,
+    808
+  ],
+  "video_frames": 711,
+  "video_first_last_seconds": [
+    0.0,
+    29.634
+  ],
+  "audio": {
+    "decoded_frames": 499,
+    "first_seconds": 0.082,
+    "last_seconds": 30.022,
+    "rms": 0.07928703700053569,
+    "peak": 1.01039719581604
+  }
+}

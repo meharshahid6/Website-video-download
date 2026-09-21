@@ -1,0 +1,30 @@
+{
+  "file": "C:\\Users\\Shahid\\Downloads\\FrameCaptureTests\\test-2026-09-21T18-29-52-880Z.raw.webm",
+  "bytes": 1075500,
+  "streams": [
+    {
+      "type": "audio",
+      "codec": "opus"
+    },
+    {
+      "type": "video",
+      "codec": "vp9"
+    }
+  ],
+  "video": {
+    "frames": 9,
+    "first": 1.18,
+    "last": 3.126,
+    "maxGap": 1.2140000000000002,
+    "resolution": [
+      1920,
+      998
+    ]
+  },
+  "audio": {
+    "frames": 1059,
+    "end": 63.536,
+    "rms": 0.08930519183705468,
+    "peak": 0.9266051054000854
+  }
+}

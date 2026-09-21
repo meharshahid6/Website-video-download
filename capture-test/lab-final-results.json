@@ -1,0 +1,28 @@
+[
+  {
+    "test": "pause",
+    "resolution": [
+      1920,
+      808
+    ],
+    "videoFrames": 209,
+    "videoDuration": 6.966666666666667,
+    "audioDuration": 6.954666666666667,
+    "endDifferenceSeconds": 0.011999999999999567,
+    "maxFrameGap": 0.0333333333333341,
+    "meanAudioRMS": 0.044138248737415675
+  },
+  {
+    "test": "buffering",
+    "resolution": [
+      1920,
+      808
+    ],
+    "videoFrames": 209,
+    "videoDuration": 6.966666666666667,
+    "audioDuration": 6.954666666666667,
+    "endDifferenceSeconds": 0.011999999999999567,
+    "maxFrameGap": 0.0333333333333341,
+    "meanAudioRMS": 0.04450659410831027
+  }
+]
