@@ -4,6 +4,7 @@
   let video = null, waiting = false, lastSent = 0;
   const listeners = [];
   let controlsHidden = false;
+  let theaterActive = false;
 
   /* ── Video geometry calculation ─────────────────────────────── */
   function geometry(v) {
@@ -35,7 +36,7 @@
     return 0;
   }
 
-  /* ── Main-world Buffer Booster (DOM Script Injection Fallback) ── */
+  /* ── Main-world Buffer Booster Fallback ─────────────────────── */
   function injectMainWorldBooster() {
     if (document.getElementById('fr-buffer-booster-script')) return;
     try {
@@ -50,11 +51,10 @@
             if (!obj || typeof obj !== 'object') return;
             try {
               if (obj.config) {
-                obj.config.maxBufferLength = 600;       // Buffer 10 mins ahead
-                obj.config.maxMaxBufferLength = 1200;   // Up to 20 mins
-                obj.config.maxBufferSize = 250 * 1024 * 1024; // 250MB buffer
-                obj.config.backBufferLength = 300;      // Keep 5 mins behind
-                obj.config.maxBufferHole = 0.5;
+                obj.config.maxBufferLength = 600;
+                obj.config.maxMaxBufferLength = 1200;
+                obj.config.maxBufferSize = 250 * 1024 * 1024;
+                obj.config.backBufferLength = 300;
                 obj.config.lowLatencyMode = false;
                 if (typeof obj.startLoad === 'function') obj.startLoad();
               }
@@ -66,14 +66,6 @@
             window.Hls.DefaultConfig.maxMaxBufferLength = 1200;
             window.Hls.DefaultConfig.maxBufferSize = 250 * 1024 * 1024;
             window.Hls.DefaultConfig.backBufferLength = 300;
-            window.Hls.DefaultConfig.lowLatencyMode = false;
-          }
-
-          if (window.videojs) {
-            if (window.videojs.Vhs) {
-              window.videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
-              window.videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
-            }
           }
 
           function scan() {
@@ -117,26 +109,48 @@
     chrome.runtime.sendMessage({ type: 'player-state', data }).catch(() => {});
   }
 
+  /* ── PointerEvent & MouseEvent multi-layer dispatcher ───────── */
+  function dispatchFullClick(el) {
+    if (!el) return;
+    try {
+      const r = el.getBoundingClientRect();
+      const cx = r.left + (r.width > 0 ? r.width / 2 : 0);
+      const cy = r.top + (r.height > 0 ? r.height / 2 : 0);
+      const opts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: cx,
+        clientY: cy,
+        screenX: cx,
+        screenY: cy,
+        button: 0,
+        buttons: 1,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true,
+        width: 1,
+        height: 1
+      };
+
+      try { el.dispatchEvent(new PointerEvent('pointerover', opts)); } catch (_) {}
+      try { el.dispatchEvent(new PointerEvent('pointerenter', opts)); } catch (_) {}
+      try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (_) {}
+      try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (_) {}
+      try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (_) {}
+      try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (_) {}
+      try { el.dispatchEvent(new MouseEvent('click', opts)); } catch (_) {}
+      if (typeof el.click === 'function') el.click();
+    } catch (_) {}
+  }
+
   /* ── Universal Instant Auto-Play Engine ─────────────────────── */
   let autoPlayTimer = null;
   let autoPlayAttempts = 0;
 
-  function dispatchClick(el) {
-    if (!el) return;
-    try {
-      const target = el.closest('button, [role="button"], a, div') || el;
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
-        target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-      });
-      if (typeof target.click === 'function') target.click();
-    } catch (_) {}
-  }
-
-  function autoPlay() {
+  async function autoPlay() {
     if (!video) return;
-    // Ensure 1x playback rate
     if (video.playbackRate !== 1) video.playbackRate = 1;
-    // Already playing
     if (!video.paused && !video.ended) {
       if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
       return;
@@ -145,66 +159,74 @@
 
     autoPlayAttempts++;
 
-    // 1. Direct unmuted play
-    const p = video.play();
-    if (p) {
-      p.then(() => {
+    // 1. Direct unmuted play attempt
+    try {
+      const p = video.play();
+      if (p) await p;
+      if (!video.paused) {
         if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
-      }).catch(async () => {
-        // 2. Immediate Muted-Autoplay Bypass (Chrome policy 100% permits muted autoplay)
-        try {
-          video.muted = true;
-          await video.play();
-          // Video is playing! Unmute after 150ms
-          setTimeout(() => { if (video) video.muted = false; }, 150);
-          if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
-          return;
-        } catch (_) {}
+        return;
+      }
+    } catch (_) {}
 
-        // 3. Click center of the video (custom center buttons like iSkills circular blue play button)
-        try {
-          const r = video.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0) {
-            const cx = r.left + r.width / 2;
-            const cy = r.top + r.height / 2;
-            const centerEl = document.elementFromPoint(cx, cy);
-            if (centerEl && centerEl !== video) {
-              dispatchClick(centerEl);
-            }
+    // 2. Muted-Autoplay Bypass (Chrome policy 100% permits muted autoplay without gesture)
+    try {
+      const wasMuted = video.muted;
+      video.muted = true;
+      await video.play();
+      // Unmute after video starts playing
+      setTimeout(() => { if (video) video.muted = wasMuted ? true : false; }, 150);
+      if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+      return;
+    } catch (_) {}
+
+    // 3. Multi-layer probe at center of video (circular blue play button in EzyCourse / iSkills)
+    try {
+      const r = video.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const elements = document.elementsFromPoint ? document.elementsFromPoint(cx, cy) : [document.elementFromPoint(cx, cy)];
+        for (const el of elements) {
+          if (el && el !== document.body && el !== document.documentElement) {
+            dispatchFullClick(el);
+            const parent = el.closest('button, [role="button"], a, div');
+            if (parent && parent !== el) dispatchFullClick(parent);
           }
-        } catch (_) {}
+        }
+      }
+    } catch (_) {}
 
-        // 4. Click all known play buttons in DOM (EzyCourse, iSkills, Plyr, Video.js, Bunny, custom buttons)
-        const selectors = [
-          '._video_play_btn', '.play-button', '.play_btn', '[class*="play_btn" i]',
-          '[class*="play-btn" i]', '[class*="playBtn" i]', '[class*="video_play" i]',
-          '[class*="play_icon" i]', '[class*="playIcon" i]',
-          '.bmpui-ui-playbacktoggle-overlay', '.bmpui-ui-hugeplaybacktogglebutton',
-          '.vjs-big-play-button', '.vjs-play-control', '.plyr__control--overlaid',
-          '[data-plyr="play"]', '[aria-label="Play" i]', '[aria-label*="play" i]',
-          '[title="Play" i]', '[title*="play" i]',
-          'button[class*="play" i]', 'div[role="button"][class*="play" i]',
-          '[class*="play-pause" i]', '[class*="play_pause" i]',
-          '._video_control_bar button', '[class*="control_bar" i] button',
-          '[class*="player_control" i] button', '[class*="controls" i] button'
-        ];
-        document.querySelectorAll(selectors.join(', ')).forEach(btn => {
-          dispatchClick(btn);
-        });
+    // 4. Click all known play buttons in DOM
+    const selectors = [
+      '._video_play_btn', '.play-button', '.play_btn', '[class*="play_btn" i]',
+      '[class*="play-btn" i]', '[class*="playBtn" i]', '[class*="video_play" i]',
+      '[class*="play_icon" i]', '[class*="playIcon" i]',
+      '.bmpui-ui-playbacktoggle-overlay', '.bmpui-ui-hugeplaybacktogglebutton',
+      '.vjs-big-play-button', '.vjs-play-control', '.plyr__control--overlaid',
+      '[data-plyr="play"]', '[aria-label="Play" i]', '[aria-label*="play" i]',
+      '[title="Play" i]', '[title*="play" i]',
+      'button[class*="play" i]', 'div[role="button"][class*="play" i]',
+      '[class*="play-pause" i]', '[class*="play_pause" i]',
+      '._video_control_bar button', '[class*="control_bar" i] button',
+      '[class*="player_control" i] button', '[class*="controls" i] button'
+    ];
+    document.querySelectorAll(selectors.join(', ')).forEach(btn => {
+      dispatchFullClick(btn);
+    });
 
-        // 5. Click the video and its parent container
-        try {
-          dispatchClick(video);
-          const container = video.closest('.video-js, .plyr, [class*="player" i]') || video.parentElement;
-          if (container && container !== document.body) dispatchClick(container);
-        } catch (_) {}
-      });
-    }
+    // 5. Click the video and immediate parent
+    try {
+      dispatchFullClick(video);
+      if (video.parentElement && video.parentElement !== document.body) {
+        dispatchFullClick(video.parentElement);
+      }
+    } catch (_) {}
 
-    // Keep retrying every 500ms until playing or 20 attempts
-    if (!autoPlayTimer && autoPlayAttempts < 20 && video.paused) {
+    // Keep retrying every 500ms until playing or 25 attempts
+    if (!autoPlayTimer && autoPlayAttempts < 25 && video.paused) {
       autoPlayTimer = setInterval(() => {
-        if (!video || !video.paused || video.ended || autoPlayAttempts >= 20) {
+        if (!video || !video.paused || video.ended || autoPlayAttempts >= 25) {
           clearInterval(autoPlayTimer);
           autoPlayTimer = null;
         } else {
@@ -214,11 +236,33 @@
     }
   }
 
-  /* ── Universal player controls hiding for clean recording ──── */
+  /* ── Dynamic In-Tab Theater Mode (activates ONLY while playing) ── */
+  function setTheaterMode(active) {
+    if (!video) return;
+    if (active) {
+      if (!theaterActive) {
+        video.classList.add('fr-clean-theater');
+        theaterActive = true;
+        if (window !== window.top) {
+          chrome.runtime.sendMessage({ type: 'activate-theater' }).catch(() => {});
+        }
+      }
+    } else {
+      if (theaterActive) {
+        video.classList.remove('fr-clean-theater');
+        theaterActive = false;
+        if (window !== window.top) {
+          chrome.runtime.sendMessage({ type: 'deactivate-theater' }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  /* ── Hide player controls (ONLY when video is actively playing) ── */
   function hidePlayerControls() {
     if (controlsHidden) return;
+    if (video && video.paused) return; // Never hide controls while paused!
 
-    // Remove native controls attribute if present
     if (video) {
       try {
         video.controls = false;
@@ -229,20 +273,9 @@
     const style = document.createElement('style');
     style.id = 'frame-recorder-hide-controls';
     style.textContent = `
-      /* HTML5 native controls */
       video::-webkit-media-controls { display: none !important; opacity: 0 !important; }
       video::-webkit-media-controls-enclosure { display: none !important; opacity: 0 !important; }
       video::-webkit-media-controls-panel { display: none !important; opacity: 0 !important; }
-
-      /* Force video element to fill container cleanly */
-      video {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        object-fit: contain !important;
-        cursor: none !important;
-      }
 
       /* EzyCourse / iSkills / React LMS player controls & overlays */
       ._video_control_bar,
@@ -255,16 +288,11 @@
       [class*="controls-bar" i],
       [class*="player_control" i],
       [class*="playerControl" i],
-      [class*="player-control" i],
       [class*="player_bottom" i],
-      [class*="player-bottom" i],
       [class*="bottom_controls" i],
-      [class*="bottom-controls" i],
       [class*="bottomControls" i],
       [class*="controls_container" i],
-      [class*="controls-container" i],
       [class*="controls_wrapper" i],
-      [class*="controls-wrapper" i],
       [class*="timeline" i],
       [class*="scrubber" i],
       [class*="progressbar" i],
@@ -294,42 +322,24 @@
       .bmpui-ui-poster,
       .bmpui-ui-titlebar,
       .bmpui-ui-subtitle-overlay,
-      .bmpui-ui-cast-status-overlay,
-      .bmpui-ui-errormessage-overlay,
-      .bmpui-ui-recommendation-overlay,
       .bmpui-ui-settings-panel,
       .bmpui-ui-controlbar,
       #player-overlay,
       .bunnyCdnPlayer__controls,
       .bunnyCdnPlayer__watermark,
       .bunnyCdnPlayer__loading,
-      [data-testid="player-controls"],
-
-      /* Common generic player UI */
-      [class*="watermark" i],
-      [class*="Watermark" i],
-      [class*="logo-container" i],
-      [class*="player-overlay" i],
-      [class*="player-controls" i],
-      [class*="video-controls" i] {
+      [data-testid="player-controls"] {
         opacity: 0 !important;
         pointer-events: none !important;
       }
     `;
     document.head.append(style);
-
-    const container = video?.closest('[class*="player"]') || video?.parentElement;
-    if (container) container.style.cursor = 'none';
-
     controlsHidden = true;
   }
 
   /* ── Restore player controls ────────────────────────────────── */
   function restorePlayerControls() {
     document.getElementById('frame-recorder-hide-controls')?.remove();
-    const container = video?.closest('[class*="player"]') || video?.parentElement;
-    if (container) container.style.cursor = '';
-    if (video) video.style.cursor = '';
     controlsHidden = false;
   }
 
@@ -355,41 +365,36 @@
     ]) {
       const fn = () => {
         if (event === 'waiting') waiting = true;
-        if (event === 'playing') waiting = false;
+        if (event === 'playing') {
+          waiting = false;
+          setTheaterMode(true);
+          hidePlayerControls();
+        }
+        if (event === 'pause' || event === 'ended') {
+          setTheaterMode(false);
+          restorePlayerControls();
+        }
         send(event);
       };
       video.addEventListener(event, fn);
       listeners.push([video, event, fn]);
     }
 
-    // Aggressive buffer preload and main-world player booster
+    // Preload buffer and inject main-world booster
     try {
       video.preload = 'auto';
       video.setAttribute('preload', 'auto');
       injectMainWorldBooster();
     } catch (_) {}
 
-    // Expand video parent containers to 100% to prevent restricted sizing
+    // Bring video into view cleanly
     try {
-      let p = video.parentElement;
-      while (p && p !== document.body && p !== document.documentElement) {
-        p.style.setProperty('width', '100%', 'important');
-        p.style.setProperty('height', '100%', 'important');
-        p.style.setProperty('max-width', 'none', 'important');
-        p.style.setProperty('max-height', 'none', 'important');
-        p.style.setProperty('margin', '0', 'important');
-        p.style.setProperty('padding', '0', 'important');
-        p = p.parentElement;
-      }
+      video.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (_) {}
 
-    // Auto-play and hide controls on first attach
+    // Auto-play on first attach
     autoPlay();
-    hidePlayerControls();
     send('attached');
-
-    // Notify background to ensure page preparation if dynamic DOM
-    chrome.runtime.sendMessage({ type: 'ensure-prepare' }).catch(() => {});
   }
 
   /* ── DOM observer + heartbeat ───────────────────────────────── */
@@ -399,6 +404,19 @@
 
   /* ── Message handler ────────────────────────────────────────── */
   const message = (msg, _sender, respond) => {
+    // Explicit user play click from HUD button
+    if (msg.type === 'hud-play-now') {
+      if (video) {
+        video.play().catch(() => {
+          video.muted = true;
+          video.play().then(() => {
+            setTimeout(() => { if (video) video.muted = false; }, 150);
+          });
+        });
+        dispatchFullClick(video);
+      }
+    }
+
     if (msg.type === 'find-frame') {
       let wanted = null;
       try { wanted = new URL(msg.url); } catch (_) {}
@@ -406,7 +424,6 @@
       const iframes = [...document.querySelectorAll('iframe')];
       let iframe = null;
 
-      // Match iframe by exact src or origin/pathname
       if (wanted) {
         iframe = iframes.find(el => {
           try {
@@ -421,15 +438,11 @@
         });
       }
 
-      // Fallback: previously marked iframe or largest visible iframe
       if (!iframe) {
-        iframe = document.querySelector('iframe[data-frame-recorder]') ||
-                 iframes.find(el => el.clientWidth >= 300 && el.clientHeight >= 180) ||
-                 iframes[0];
+        iframe = iframes.find(el => el.clientWidth >= 300 && el.clientHeight >= 180) || iframes[0];
       }
 
       if (!iframe) {
-        // Safe viewport fallback
         respond({
           x: 0, y: 0, width: innerWidth, height: innerHeight,
           viewport: { width: innerWidth, height: innerHeight }
@@ -449,8 +462,10 @@
 
     if (msg.type === 'monitor-stop') {
       clearInterval(interval);
+      if (autoPlayTimer) clearInterval(autoPlayTimer);
       observer.disconnect();
       for (const [el, event, fn] of listeners) el.removeEventListener(event, fn);
+      setTheaterMode(false);
       restorePlayerControls();
       chrome.runtime.onMessage.removeListener(message);
       delete window.__frameRecorderMonitor;

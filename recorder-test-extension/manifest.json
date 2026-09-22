@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Universal Video Course Recorder",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "minimum_chrome_version": "116",
   "description": "One-click clean 16:9 fullscreen lecture recorder with instant auto-play, zero black bars, and smart pause trimming.",
   "permissions": ["activeTab", "tabCapture", "offscreen", "scripting", "downloads", "storage"],

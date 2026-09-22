@@ -16,7 +16,7 @@ async function reportFailure(error, stage = 'startup') {
   const detail = error?.message || String(error);
   badgeErr();
   await chrome.action.setTitle({ title: 'Recording error: ' + detail });
-  const report = { build: '0.4.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
+  const report = { build: '0.7.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
   await chrome.storage.local.set({ lastError: detail, lastFailure: report });
   const name = 'FrameCaptureTests/error-' + report.at.replace(/[:.]/g, '-') + '.json';
   try {
@@ -29,7 +29,7 @@ async function reportFailure(error, stage = 'startup') {
   }
 }
 
-/* ── Main-world Buffer Booster: maximize player cache limits ────── */
+/* ── Main-world Buffer Booster & Player Starter ────────────────── */
 function runMainWorldBufferBooster() {
   if (window.__frBufferBoosterActive) return;
   window.__frBufferBoosterActive = true;
@@ -79,181 +79,70 @@ function runMainWorldBufferBooster() {
     });
   }
 
-  scan();
-  setInterval(scan, 2000);
-}
-
-/* ── Prepare: fullscreen video or iframe + hide page chrome ─────── */
-async function prepare(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId }, func: () => {
-    if (document.getElementById('frame-recorder-restore')) return;
-
-    // Helper to find video element or player container or iframe
-    function findTarget() {
-      // 1. Check for known video provider iframes (BunnyCDN, Vimeo, YouTube, Wistia, etc.)
-      const iframes = [...document.querySelectorAll('iframe')];
-      const videoIframe = iframes.find(e => {
-        try {
-          const h = new URL(e.src).hostname.toLowerCase();
-          return (
-            h.includes('mediadelivery.net') ||
-            h.includes('bunny') ||
-            h.includes('vimeo') ||
-            h.includes('youtube') ||
-            h.includes('wistia') ||
-            h.includes('cloudflarestream') ||
-            h.includes('loom.com') ||
-            h.includes('stream') ||
-            h.includes('player')
-          );
-        } catch { return false; }
-      });
-      if (videoIframe) return videoIframe;
-
-      // 2. Check for any iframe containing a video tag (same-origin)
-      for (const f of iframes) {
-        try {
-          if (f.contentDocument && f.contentDocument.querySelector('video')) {
-            return f;
-          }
-        } catch (_) {}
-      }
-
-      // 3. Check for direct <video> elements on the page (largest visible video)
-      const videos = [...document.querySelectorAll('video')]
-        .filter(v => {
-          const r = v.getBoundingClientRect();
-          return (r.width > 120 && r.height > 80) || v.videoWidth > 0;
-        })
-        .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight);
-
-      if (videos.length > 0) {
-        const v = videos[0];
-        // Find player wrapper container if available, otherwise the video itself
-        const wrapper = v.closest(
-          '.video-js, .plyr, [class*="player-wrapper" i], [class*="player_wrapper" i], ' +
-          '[class*="video-player" i], [class*="video_player" i], [class*="player-container" i], ' +
-          '[class*="playerContainer" i], [class*="course_player" i], [class*="player" i], [id*="player" i]'
-        );
-        return wrapper || v;
-      }
-
-      // 4. Fallback: find any substantial iframe (at least 300x180)
-      const largeIframe = iframes
-        .filter(f => {
-          const r = f.getBoundingClientRect();
-          return r.width >= 300 && r.height >= 180;
-        })
-        .sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
-
-      if (largeIframe) return largeIframe;
-
-      return null;
-    }
-
-    const target = findTarget();
-    if (!target) return;
-
-    // Save original state for clean restoration
-    const marker = document.createElement('script');
-    marker.type = 'application/json';
-    marker.id = 'frame-recorder-restore';
-    marker.textContent = JSON.stringify({
-      targetStyle: target.getAttribute('style'),
-      bodyOverflow: document.body.style.overflow,
-      htmlOverflow: document.documentElement.style.overflow,
-      bodyMargin: document.body.style.margin,
-      bodyBg: document.body.style.backgroundColor
+  function tryMainWorldPlay() {
+    document.querySelectorAll('video').forEach(v => {
+      try {
+        if (v.paused) {
+          if (v._player?.play) v._player.play();
+          else if (v.player?.play) v.player.play();
+          else if (typeof v.play === 'function') v.play().catch(() => {});
+        }
+      } catch (_) {}
     });
-    target.dataset.frameRecorder = 'true';
-    document.documentElement.append(marker);
-
-    // Make target element fill the entire viewport
-    target.style.cssText += `;
-      position: fixed !important;
-      inset: 0 !important;
-      width: 100vw !important;
-      height: 100vh !important;
-      max-width: none !important;
-      max-height: none !important;
-      z-index: 2147483645 !important;
-      border: 0 !important;
-      margin: 0 !important;
-      padding: 0 !important;
-      background: #000 !important;
-    `;
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-
-    // Hide all page chrome (headers, sidebars, curriculum panels, action buttons)
-    const overlay = document.createElement('style');
-    overlay.id = 'frame-recorder-hide-chrome';
-    overlay.textContent = `
-      body { margin: 0 !important; padding: 0 !important; background: #000 !important; }
-      html { scrollbar-width: none !important; background: #000 !important; }
-      html::-webkit-scrollbar { display: none !important; }
-      /* Hide everything by default */
-      body * { visibility: hidden !important; }
-      /* Force target element and its contents visible */
-      [data-frame-recorder],
-      [data-frame-recorder] * { visibility: visible !important; }
-      /* Ensure nested video fills container */
-      [data-frame-recorder] video {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        object-fit: contain !important;
-      }
-      /* Keep HUD visible */
-      #frame-recorder-hud, #frame-recorder-hud * { visibility: visible !important; }
-    `;
-    document.head.append(overlay);
-
-    // Walk up the parent chain and force each ancestor visible
-    let el = target.parentElement;
-    while (el && el !== document.documentElement) {
-      el.style.setProperty('visibility', 'visible', 'important');
-      el.dataset.frameRecorderChain = 'true';
-      el = el.parentElement;
+    if (window.videojs) {
+      try {
+        const players = window.videojs.getPlayers ? Object.values(window.videojs.getPlayers()) : [];
+        players.forEach(p => { if (p && p.paused && p.play) p.play(); });
+      } catch (_) {}
     }
-  }});
-}
-
-/* ── Cleanup: restore page state and window ─────────────────────── */
-async function cleanup(tabId) {
-  // Restore window state if it was fullscreened for recording
-  if (session?.windowId && session?.originalWindowState && session.originalWindowState !== 'fullscreen') {
-    try {
-      await chrome.windows.update(session.windowId, { state: session.originalWindowState });
-    } catch (_) {}
+    if (window.player && typeof window.player.play === 'function') {
+      try { window.player.play(); } catch (_) {}
+    }
   }
 
+  scan();
+  tryMainWorldPlay();
+  setInterval(scan, 2000);
+  setTimeout(tryMainWorldPlay, 500);
+}
+
+/* ── Prepare: inject clean theater styling into tab (no DOM breaking) ── */
+async function prepare(tabId) {
   await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
-    // Restore target element in main frame
-    const marker = document.getElementById('frame-recorder-restore');
-    const target = document.querySelector('[data-frame-recorder]');
-    if (marker && target) {
-      try {
-        const old = JSON.parse(marker.textContent);
-        if (old.targetStyle === null) target.removeAttribute('style');
-        else target.setAttribute('style', old.targetStyle);
-        document.body.style.overflow = old.bodyOverflow || '';
-        document.documentElement.style.overflow = old.htmlOverflow || '';
-        if (old.bodyMargin !== undefined) document.body.style.margin = old.bodyMargin;
-        if (old.bodyBg !== undefined) document.body.style.backgroundColor = old.bodyBg;
-      } catch (_) {}
-      delete target.dataset.frameRecorder;
-      marker.remove();
-    }
-    // Remove page-chrome-hiding style
-    document.getElementById('frame-recorder-hide-chrome')?.remove();
-    // Restore parent chain visibility
-    document.querySelectorAll('[data-frame-recorder-chain]').forEach(el => {
-      el.style.removeProperty('visibility');
-      delete el.dataset.frameRecorderChain;
-    });
-    // Remove HUD
+    if (document.getElementById('frame-recorder-theater-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'frame-recorder-theater-style';
+    style.textContent = `
+      .fr-clean-theater {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: 100vw !important;
+        max-height: 100vh !important;
+        z-index: 2147483640 !important;
+        object-fit: contain !important;
+        background: #000 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        box-sizing: border-box !important;
+      }
+      #frame-recorder-hud {
+        z-index: 2147483646 !important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }}).catch(() => {});
+}
+
+/* ── Cleanup: restore page and remove HUD ───────────────────────── */
+async function cleanup(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
+    document.querySelectorAll('.fr-clean-theater').forEach(el => el.classList.remove('fr-clean-theater'));
+    document.getElementById('frame-recorder-theater-style')?.remove();
     document.getElementById('frame-recorder-hud')?.remove();
   }}).catch(() => {});
   await chrome.tabs.sendMessage(tabId, { type: 'monitor-stop' }).catch(() => {});
@@ -298,24 +187,13 @@ chrome.action.onClicked.addListener(async tab => {
 
     const filePrefix = `${siteName}_${cleanTitle || 'Lecture'}`;
 
-    // Switch window to Fullscreen mode so the viewport is native 1920x1080 (16:9) with zero black bars
-    let originalWindowState = 'maximized';
-    try {
-      const win = await chrome.windows.get(tab.windowId);
-      originalWindowState = win.state || 'maximized';
-      if (originalWindowState !== 'fullscreen') {
-        await chrome.windows.update(tab.windowId, { state: 'fullscreen' });
-        await new Promise(r => setTimeout(r, 450));
-      }
-    } catch (_) {}
-
-    // Start new session
-    session = { tabId: tab.id, windowId: tab.windowId, originalWindowState, frameId: null, started: Date.now(), filePrefix };
+    // Browser window stays in user's normal/maximized window (never force OS fullscreen)
+    session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix };
     await chrome.storage.session.set({ testSession: session });
     badgeWait();
     await chrome.action.setTitle({ title: 'Preparing recording...' });
 
-    // Fullscreen video/iframe + hide page chrome
+    // Inject theater style rules into tab
     await prepare(tab.id);
 
     // Create offscreen document for recording
@@ -339,7 +217,7 @@ chrome.action.onClicked.addListener(async tab => {
       func: runMainWorldBufferBooster
     }).catch(() => {});
 
-    // Inject monitor (auto-play, hide player controls) into all frames and HUD into top frame
+    // Inject monitor (auto-play, geometry, theater control) and HUD
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['monitor.js'] });
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['hud.js'] });
 
@@ -396,9 +274,35 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       await chrome.runtime.sendMessage({ to: 'recorder', type: 'state', data });
     }
 
-    /* Request to ensure page is prepared if video attached late */
-    if (msg.type === 'ensure-prepare' && session && sender.tab?.id === session.tabId) {
-      await prepare(session.tabId);
+    /* Top frame theater mode sync for iframes */
+    if (msg.type === 'activate-theater' && session && sender.tab?.id === session.tabId) {
+      chrome.scripting.executeScript({
+        target: { tabId: session.tabId },
+        func: () => {
+          const iframes = [...document.querySelectorAll('iframe')];
+          const activeIframe = iframes.find(f => {
+            try {
+              const r = f.getBoundingClientRect();
+              return r.width > 200 && r.height > 100;
+            } catch { return false; }
+          });
+          if (activeIframe) activeIframe.classList.add('fr-clean-theater');
+        }
+      }).catch(() => {});
+    }
+
+    if (msg.type === 'deactivate-theater' && session && sender.tab?.id === session.tabId) {
+      chrome.scripting.executeScript({
+        target: { tabId: session.tabId },
+        func: () => {
+          document.querySelectorAll('iframe.fr-clean-theater').forEach(el => el.classList.remove('fr-clean-theater'));
+        }
+      }).catch(() => {});
+    }
+
+    /* HUD play button click forwarded to tab */
+    if (msg.type === 'hud-trigger-play' && session) {
+      chrome.tabs.sendMessage(session.tabId, { type: 'hud-play-now' }).catch(() => {});
     }
 
     /* Recorder status updates */
@@ -418,7 +322,11 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
       // Forward status to HUD on the page
       if (session) {
-        chrome.tabs.sendMessage(session.tabId, { type: 'hud-status', status: s, detail: msg.detail || '' }).catch(() => {});
+        chrome.tabs.sendMessage(session.tabId, {
+          type: 'hud-status',
+          status: s,
+          playbackHasStarted: !!msg.playbackHasStarted
+        }).catch(() => {});
       }
     }
 
@@ -443,35 +351,14 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         }
       } catch (e) { error = e.message; }
 
-      // Cleanup session & restore window state
+      // Cleanup session
       if (session) await cleanup(session.tabId);
       session = null;
       await chrome.storage.session.remove('testSession');
 
-      if (error) {
-        badgeErr();
-        await chrome.action.setTitle({ title: 'Save error: ' + error });
-      } else {
-        badgeDone();
-        await chrome.action.setTitle({ title: 'Recording saved to Downloads/FrameCaptureTests' });
-      }
-      await chrome.storage.local.set({ lastResult: { ...msg, saveError: error } });
+      await chrome.storage.local.set({ lastSave: { at: new Date().toISOString(), base, error } });
+      setTimeout(() => chrome.offscreen.closeDocument().catch(() => {}), 1500);
     }
-
-  })().then(
-    () => respond({ ok: true }),
-    async error => {
-      badgeErr();
-      await chrome.storage.local.set({ lastError: error.message });
-      await chrome.runtime.sendMessage({ to: 'recorder', type: 'stop', reason: error.message }).catch(() => {});
-      respond({ error: error.message });
-    }
-  );
+  })();
   return true;
-});
-
-/* ── Tab close detection ─────────────────────────────────────── */
-chrome.tabs.onRemoved.addListener(tabId => {
-  if (session?.tabId === tabId)
-    chrome.runtime.sendMessage({ to: 'recorder', type: 'stop', reason: 'source-tab-closed' }).catch(() => {});
 });
