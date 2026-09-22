@@ -11,6 +11,7 @@
       <span id="frhud-dot"></span>
       <span id="frhud-status">WAIT</span>
       <span id="frhud-time">0:00</span>
+      <span id="frhud-buf" title="Video buffered ahead in advance">⚡ 0s</span>
       <button id="frhud-stop" title="Stop recording">■</button>
     </div>
   `;
@@ -73,6 +74,20 @@
       color: rgba(255,255,255,0.7) !important;
       font-variant-numeric: tabular-nums !important;
     }
+    #frhud-buf {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 3px !important;
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.15) !important;
+      border: 1px solid rgba(56, 189, 248, 0.3) !important;
+      padding: 2px 6px !important;
+      border-radius: 4px !important;
+      letter-spacing: 0.3px !important;
+      transition: all 0.2s ease !important;
+    }
     #frhud-stop {
       background: rgba(239, 68, 68, 0.8) !important;
       color: #fff !important;
@@ -104,6 +119,7 @@
   const dot = hud.querySelector('#frhud-dot');
   const statusEl = hud.querySelector('#frhud-status');
   const timeEl = hud.querySelector('#frhud-time');
+  const bufEl = hud.querySelector('#frhud-buf');
   const stopBtn = hud.querySelector('#frhud-stop');
 
   function formatTime(sec) {
@@ -149,6 +165,32 @@
       currentStatus = msg.status;
       if (!lastTick) lastTick = Date.now();
       updateDisplay();
+    }
+    if (msg.type === 'hud-buffer' && typeof msg.bufferedAhead === 'number') {
+      const sec = msg.bufferedAhead;
+      if (sec < 60) {
+        bufEl.textContent = `⚡ ${sec}s`;
+      } else {
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        bufEl.textContent = s > 0 ? `⚡ ${m}m ${s}s` : `⚡ ${m}m`;
+      }
+      if (sec >= 60) {
+        bufEl.style.color = '#4ade80';
+        bufEl.style.background = 'rgba(74, 222, 128, 0.15)';
+        bufEl.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+        bufEl.title = `Healthy buffer: ${sec}s ahead in advance. Safe from disconnects!`;
+      } else if (sec >= 20) {
+        bufEl.style.color = '#38bdf8';
+        bufEl.style.background = 'rgba(56, 189, 248, 0.15)';
+        bufEl.style.borderColor = 'rgba(56, 189, 248, 0.3)';
+        bufEl.title = `Buffer: ${sec}s ahead in advance.`;
+      } else {
+        bufEl.style.color = '#facc15';
+        bufEl.style.background = 'rgba(250, 204, 21, 0.15)';
+        bufEl.style.borderColor = 'rgba(250, 204, 21, 0.3)';
+        bufEl.title = `Buffering: only ${sec}s ahead.`;
+      }
     }
     if (msg.type === 'monitor-stop') {
       clearInterval(timer);

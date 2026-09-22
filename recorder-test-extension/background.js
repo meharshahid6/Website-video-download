@@ -29,6 +29,60 @@ async function reportFailure(error, stage = 'startup') {
   }
 }
 
+/* ── Main-world Buffer Booster: maximize player cache limits ────── */
+function runMainWorldBufferBooster() {
+  if (window.__frBufferBoosterActive) return;
+  window.__frBufferBoosterActive = true;
+
+  function boost(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    try {
+      if (obj.config) {
+        obj.config.maxBufferLength = 600;       // Buffer 10 mins ahead
+        obj.config.maxMaxBufferLength = 1200;   // Up to 20 mins
+        obj.config.maxBufferSize = 250 * 1024 * 1024; // 250MB buffer
+        obj.config.backBufferLength = 300;      // Keep 5 mins behind
+        obj.config.maxBufferHole = 0.5;
+        obj.config.lowLatencyMode = false;
+        if (typeof obj.startLoad === 'function') obj.startLoad();
+      }
+    } catch (_) {}
+  }
+
+  if (window.Hls && window.Hls.DefaultConfig) {
+    window.Hls.DefaultConfig.maxBufferLength = 600;
+    window.Hls.DefaultConfig.maxMaxBufferLength = 1200;
+    window.Hls.DefaultConfig.maxBufferSize = 250 * 1024 * 1024;
+    window.Hls.DefaultConfig.backBufferLength = 300;
+    window.Hls.DefaultConfig.lowLatencyMode = false;
+  }
+
+  if (window.videojs) {
+    if (window.videojs.Vhs) {
+      window.videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
+      window.videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
+    }
+  }
+
+  function scan() {
+    document.querySelectorAll('video').forEach(v => {
+      try {
+        v.preload = 'auto';
+        if (v._hls) boost(v._hls);
+        if (v.hls) boost(v.hls);
+        if (v.player) boost(v.player);
+        if (v._player) boost(v._player);
+      } catch (_) {}
+    });
+    ['player', 'hls', 'hlsPlayer', 'dp', 'art', 'jwplayer'].forEach(k => {
+      try { if (window[k]) boost(window[k]); } catch (_) {}
+    });
+  }
+
+  scan();
+  setInterval(scan, 2000);
+}
+
 /* ── Prepare: fullscreen video or iframe + hide page chrome ─────── */
 async function prepare(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, func: () => {
@@ -260,6 +314,13 @@ chrome.action.onClicked.addListener(async tab => {
     const startResult = await chrome.runtime.sendMessage({ to: 'recorder', type: 'start', streamId });
     if (startResult?.error) throw Error(startResult.error);
 
+    // Inject Buffer Booster into MAIN world across all frames to boost player cache limits
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      world: 'MAIN',
+      func: runMainWorldBufferBooster
+    }).catch(() => {});
+
     // Inject monitor (auto-play, hide player controls) into all frames and HUD into top frame
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['monitor.js'] });
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['hud.js'] });
@@ -287,6 +348,14 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       if (!data.sourceWidth || !data.rect.width) return;
       session.frameId = sender.frameId;
       await chrome.storage.session.set({ testSession: session });
+
+      // Forward live buffer info to on-page HUD
+      if (typeof data.bufferedAhead === 'number') {
+        chrome.tabs.sendMessage(session.tabId, {
+          type: 'hud-buffer',
+          bufferedAhead: data.bufferedAhead
+        }).catch(() => {});
+      }
 
       // Remap coordinates if video is inside a nested iframe
       if (sender.frameId !== 0) {

@@ -20,6 +20,86 @@
     return { x: r.x + (r.width - w) / 2, y: r.y + (r.height - h) / 2, width: w, height: h };
   }
 
+  /* ── Calculate how many seconds buffered ahead in advance ───── */
+  function getBufferedAhead(v) {
+    if (!v || !v.buffered || !v.buffered.length) return 0;
+    const cur = v.currentTime;
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= cur && cur <= v.buffered.end(i)) {
+        return Math.max(0, v.buffered.end(i) - cur);
+      }
+    }
+    if (v.buffered.length > 0 && v.buffered.start(0) > cur) {
+      return Math.max(0, v.buffered.end(0) - cur);
+    }
+    return 0;
+  }
+
+  /* ── Main-world Buffer Booster (DOM Script Injection Fallback) ── */
+  function injectMainWorldBooster() {
+    if (document.getElementById('fr-buffer-booster-script')) return;
+    try {
+      const script = document.createElement('script');
+      script.id = 'fr-buffer-booster-script';
+      script.textContent = `
+        (() => {
+          if (window.__frBufferBoosterActive) return;
+          window.__frBufferBoosterActive = true;
+
+          function boost(obj) {
+            if (!obj || typeof obj !== 'object') return;
+            try {
+              if (obj.config) {
+                obj.config.maxBufferLength = 600;       // Buffer 10 mins ahead
+                obj.config.maxMaxBufferLength = 1200;   // Up to 20 mins
+                obj.config.maxBufferSize = 250 * 1024 * 1024; // 250MB buffer
+                obj.config.backBufferLength = 300;      // Keep 5 mins behind
+                obj.config.maxBufferHole = 0.5;
+                obj.config.lowLatencyMode = false;
+                if (typeof obj.startLoad === 'function') obj.startLoad();
+              }
+            } catch (_) {}
+          }
+
+          if (window.Hls && window.Hls.DefaultConfig) {
+            window.Hls.DefaultConfig.maxBufferLength = 600;
+            window.Hls.DefaultConfig.maxMaxBufferLength = 1200;
+            window.Hls.DefaultConfig.maxBufferSize = 250 * 1024 * 1024;
+            window.Hls.DefaultConfig.backBufferLength = 300;
+            window.Hls.DefaultConfig.lowLatencyMode = false;
+          }
+
+          if (window.videojs) {
+            if (window.videojs.Vhs) {
+              window.videojs.Vhs.GOAL_BUFFER_LENGTH = 300;
+              window.videojs.Vhs.MAX_GOAL_BUFFER_LENGTH = 600;
+            }
+          }
+
+          function scan() {
+            document.querySelectorAll('video').forEach(v => {
+              try {
+                v.preload = 'auto';
+                if (v._hls) boost(v._hls);
+                if (v.hls) boost(v.hls);
+                if (v.player) boost(v.player);
+                if (v._player) boost(v._player);
+              } catch (_) {}
+            });
+            ['player', 'hls', 'hlsPlayer', 'dp', 'art', 'jwplayer'].forEach(k => {
+              try { if (window[k]) boost(window[k]); } catch (_) {}
+            });
+          }
+
+          scan();
+          setInterval(scan, 2000);
+        })();
+      `;
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+    } catch (_) {}
+  }
+
   /* ── Send player state to background ────────────────────────── */
   function send(event = 'heartbeat') {
     if (!video || !video.isConnected) return;
@@ -27,6 +107,7 @@
       event, paused: video.paused, ended: video.ended, seeking: video.seeking,
       waiting, readyState: video.readyState, error: video.error?.message || null,
       playbackRate: video.playbackRate, currentTime: video.currentTime,
+      bufferedAhead: Math.round(getBufferedAhead(video)),
       sourceWidth: video.videoWidth, sourceHeight: video.videoHeight,
       rect: geometry(video),
       viewport: { width: innerWidth, height: innerHeight },
@@ -227,7 +308,7 @@
     // Attach event listeners
     for (const event of [
       'playing', 'pause', 'waiting', 'seeking', 'seeked', 'ended',
-      'error', 'loadedmetadata', 'resize', 'ratechange', 'volumechange', 'canplay'
+      'progress', 'error', 'loadedmetadata', 'resize', 'ratechange', 'volumechange', 'canplay'
     ]) {
       const fn = () => {
         if (event === 'waiting') waiting = true;
@@ -237,6 +318,13 @@
       video.addEventListener(event, fn);
       listeners.push([video, event, fn]);
     }
+
+    // Aggressive buffer preload and main-world player booster
+    try {
+      video.preload = 'auto';
+      video.setAttribute('preload', 'auto');
+      injectMainWorldBooster();
+    } catch (_) {}
 
     // Auto-play and hide controls on first attach
     autoPlay();
