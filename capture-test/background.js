@@ -16,7 +16,7 @@ async function reportFailure(error, stage = 'startup') {
   const detail = error?.message || String(error);
   badgeErr();
   await chrome.action.setTitle({ title: 'Recording error: ' + detail });
-  const report = { build: '0.7.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
+  const report = { build: '0.8.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
   await chrome.storage.local.set({ lastError: detail, lastFailure: report });
   const name = 'FrameCaptureTests/error-' + report.at.replace(/[:.]/g, '-') + '.json';
   try {
@@ -29,7 +29,7 @@ async function reportFailure(error, stage = 'startup') {
   }
 }
 
-/* ── Main-world Buffer Booster & Player Starter ────────────────── */
+/* ── Main-world Buffer Booster ─────────────────────────────────── */
 function runMainWorldBufferBooster() {
   if (window.__frBufferBoosterActive) return;
   window.__frBufferBoosterActive = true;
@@ -38,10 +38,10 @@ function runMainWorldBufferBooster() {
     if (!obj || typeof obj !== 'object') return;
     try {
       if (obj.config) {
-        obj.config.maxBufferLength = 600;       // Buffer 10 mins ahead
-        obj.config.maxMaxBufferLength = 1200;   // Up to 20 mins
-        obj.config.maxBufferSize = 250 * 1024 * 1024; // 250MB buffer
-        obj.config.backBufferLength = 300;      // Keep 5 mins behind
+        obj.config.maxBufferLength = 600;
+        obj.config.maxMaxBufferLength = 1200;
+        obj.config.maxBufferSize = 250 * 1024 * 1024;
+        obj.config.backBufferLength = 300;
         obj.config.maxBufferHole = 0.5;
         obj.config.lowLatencyMode = false;
         if (typeof obj.startLoad === 'function') obj.startLoad();
@@ -79,70 +79,73 @@ function runMainWorldBufferBooster() {
     });
   }
 
-  function tryMainWorldPlay() {
-    document.querySelectorAll('video').forEach(v => {
-      try {
-        if (v.paused) {
-          if (v._player?.play) v._player.play();
-          else if (v.player?.play) v.player.play();
-          else if (typeof v.play === 'function') v.play().catch(() => {});
-        }
-      } catch (_) {}
-    });
-    if (window.videojs) {
-      try {
-        const players = window.videojs.getPlayers ? Object.values(window.videojs.getPlayers()) : [];
-        players.forEach(p => { if (p && p.paused && p.play) p.play(); });
-      } catch (_) {}
-    }
-    if (window.player && typeof window.player.play === 'function') {
-      try { window.player.play(); } catch (_) {}
-    }
+  scan();
+  setInterval(scan, 2000);
+}
+
+/* ── Extract lesson title from page DOM ─────────────────────────── */
+function extractLessonTitle() {
+  // 1. EzyCourse / iSkills: The active lesson in the sidebar has a blue dot / active state
+  //    The lesson name "Niche research through Flippa" appears near the top header area
+  const titleSelectors = [
+    // EzyCourse specific: active curriculum item title
+    '[class*="active" i] [class*="lesson" i]',
+    '[class*="active" i] [class*="title" i]',
+    '[class*="curriculum" i] [class*="active" i]',
+    '[class*="selected" i] [class*="title" i]',
+    // Lesson title heading in content area
+    '[class*="lesson_title" i]',
+    '[class*="lessonTitle" i]',
+    '[class*="lesson-title" i]',
+    '[class*="lecture_title" i]',
+    '[class*="lectureTitle" i]',
+    '[class*="lecture-title" i]',
+    '[class*="content_title" i]',
+    '[class*="contentTitle" i]',
+    // iSkills specific: the lesson name appears next to the "Close" button
+    '[class*="drip_content" i] [class*="title" i]',
+    '[class*="course_content" i] [class*="active" i]',
+  ];
+
+  for (const sel of titleSelectors) {
+    try {
+      const el = document.querySelector(sel);
+      const text = el?.textContent?.trim();
+      if (text && text.length > 2 && text.length < 120) return text;
+    } catch (_) {}
   }
 
-  scan();
-  tryMainWorldPlay();
-  setInterval(scan, 2000);
-  setTimeout(tryMainWorldPlay, 500);
+  // 2. Look for the first active sidebar item that contains "Video" label
+  try {
+    const items = document.querySelectorAll('[class*="active" i], [class*="current" i], [class*="selected" i]');
+    for (const item of items) {
+      const text = item.textContent?.trim();
+      if (text && text.length > 2 && text.length < 120 && !text.includes('\n\n')) {
+        // Clean: take first line only (avoids picking up "Video" subtitle)
+        const firstLine = text.split('\n')[0].trim();
+        if (firstLine.length > 2) return firstLine;
+      }
+    }
+  } catch (_) {}
+
+  // 3. Check headings near the video
+  for (const tag of ['h1', 'h2', 'h3']) {
+    try {
+      const els = document.querySelectorAll(tag);
+      for (const el of els) {
+        const text = el.textContent?.trim();
+        if (text && text.length > 3 && text.length < 100) return text;
+      }
+    } catch (_) {}
+  }
+
+  // 4. Fallback: page title
+  return document.title || 'Lecture';
 }
 
-/* ── Prepare: inject clean theater styling into tab (no DOM breaking) ── */
-async function prepare(tabId) {
-  await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
-    if (document.getElementById('frame-recorder-theater-style')) return;
-
-    const style = document.createElement('style');
-    style.id = 'frame-recorder-theater-style';
-    style.textContent = `
-      .fr-clean-theater {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: 100vw !important;
-        max-height: 100vh !important;
-        z-index: 2147483640 !important;
-        object-fit: contain !important;
-        background: #000 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: none !important;
-        box-sizing: border-box !important;
-      }
-      #frame-recorder-hud {
-        z-index: 2147483646 !important;
-      }
-    `;
-    (document.head || document.documentElement).appendChild(style);
-  }}).catch(() => {});
-}
-
-/* ── Cleanup: restore page and remove HUD ───────────────────────── */
+/* ── Cleanup: remove HUD and stop monitor ──────────────────────── */
 async function cleanup(tabId) {
   await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
-    document.querySelectorAll('.fr-clean-theater').forEach(el => el.classList.remove('fr-clean-theater'));
-    document.getElementById('frame-recorder-theater-style')?.remove();
     document.getElementById('frame-recorder-hud')?.remove();
   }}).catch(() => {});
   await chrome.tabs.sendMessage(tabId, { type: 'monitor-stop' }).catch(() => {});
@@ -172,29 +175,36 @@ chrome.action.onClicked.addListener(async tab => {
       throw Error('Please open a website with a video lesson first.');
     }
 
-    // Generate intelligent file prefix from site domain and page title
+    // Extract lesson-specific title from the page DOM (not just tab title)
+    let lessonTitle = 'Lecture';
+    try {
+      const result = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: extractLessonTitle
+      });
+      if (result?.[0]?.result) lessonTitle = result[0].result;
+    } catch (_) {}
+
+    // Build file prefix: SiteName_LessonTitle
     let siteName = 'Video';
     try {
       const host = new URL(tab.url).hostname.replace(/^www\./, '').split('.')[0];
       if (host) siteName = host.charAt(0).toUpperCase() + host.slice(1);
     } catch (_) {}
 
-    const cleanTitle = (tab.title || 'Lecture')
+    const cleanTitle = lessonTitle
       .replace(/[^\w\s-]/g, '')
       .trim()
       .replace(/\s+/g, '_')
-      .slice(0, 40);
+      .slice(0, 60);
 
     const filePrefix = `${siteName}_${cleanTitle || 'Lecture'}`;
 
-    // Browser window stays in user's normal/maximized window (never force OS fullscreen)
+    // Start session — NO window fullscreen, page stays exactly as user sees it
     session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix };
     await chrome.storage.session.set({ testSession: session });
     badgeWait();
     await chrome.action.setTitle({ title: 'Preparing recording...' });
-
-    // Inject theater style rules into tab
-    await prepare(tab.id);
 
     // Create offscreen document for recording
     const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
@@ -210,14 +220,14 @@ chrome.action.onClicked.addListener(async tab => {
     const startResult = await chrome.runtime.sendMessage({ to: 'recorder', type: 'start', streamId });
     if (startResult?.error) throw Error(startResult.error);
 
-    // Inject Buffer Booster into MAIN world across all frames to boost player cache limits
+    // Inject Buffer Booster into MAIN world across all frames
     await chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       world: 'MAIN',
       func: runMainWorldBufferBooster
     }).catch(() => {});
 
-    // Inject monitor (auto-play, geometry, theater control) and HUD
+    // Inject monitor (auto-play + geometry tracking) and HUD into tab
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['monitor.js'] });
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['hud.js'] });
 
@@ -272,32 +282,6 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         }
       }
       await chrome.runtime.sendMessage({ to: 'recorder', type: 'state', data });
-    }
-
-    /* Top frame theater mode sync for iframes */
-    if (msg.type === 'activate-theater' && session && sender.tab?.id === session.tabId) {
-      chrome.scripting.executeScript({
-        target: { tabId: session.tabId },
-        func: () => {
-          const iframes = [...document.querySelectorAll('iframe')];
-          const activeIframe = iframes.find(f => {
-            try {
-              const r = f.getBoundingClientRect();
-              return r.width > 200 && r.height > 100;
-            } catch { return false; }
-          });
-          if (activeIframe) activeIframe.classList.add('fr-clean-theater');
-        }
-      }).catch(() => {});
-    }
-
-    if (msg.type === 'deactivate-theater' && session && sender.tab?.id === session.tabId) {
-      chrome.scripting.executeScript({
-        target: { tabId: session.tabId },
-        func: () => {
-          document.querySelectorAll('iframe.fr-clean-theater').forEach(el => el.classList.remove('fr-clean-theater'));
-        }
-      }).catch(() => {});
     }
 
     /* HUD play button click forwarded to tab */

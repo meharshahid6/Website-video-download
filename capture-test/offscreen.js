@@ -119,7 +119,7 @@ async function save() {
   raw?.getTracks().forEach(t => t.stop());
 
   const report = {
-    testBuild: '0.7.0',
+    testBuild: '0.8.0',
     strategy: 'continuous-capture-then-trim',
     cropAfterCapture: true,
     stopReason,

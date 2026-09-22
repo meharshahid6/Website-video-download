@@ -3,8 +3,6 @@
 
   let video = null, waiting = false, lastSent = 0;
   const listeners = [];
-  let controlsHidden = false;
-  let theaterActive = false;
 
   /* ── Video geometry calculation ─────────────────────────────── */
   function geometry(v) {
@@ -21,7 +19,7 @@
     return { x: r.x + (r.width - w) / 2, y: r.y + (r.height - h) / 2, width: w, height: h };
   }
 
-  /* ── Calculate how many seconds buffered ahead in advance ───── */
+  /* ── Calculate how many seconds buffered ahead ─────────────── */
   function getBufferedAhead(v) {
     if (!v || !v.buffered || !v.buffered.length) return 0;
     const cur = v.currentTime;
@@ -169,18 +167,17 @@
       }
     } catch (_) {}
 
-    // 2. Muted-Autoplay Bypass (Chrome policy 100% permits muted autoplay without gesture)
+    // 2. Muted-Autoplay Bypass (Chrome autoplay policy permits muted autoplay)
     try {
       const wasMuted = video.muted;
       video.muted = true;
       await video.play();
-      // Unmute after video starts playing
       setTimeout(() => { if (video) video.muted = wasMuted ? true : false; }, 150);
       if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
       return;
     } catch (_) {}
 
-    // 3. Multi-layer probe at center of video (circular blue play button in EzyCourse / iSkills)
+    // 3. Multi-layer probe at center of video (circular blue play button on iSkills etc.)
     try {
       const r = video.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) {
@@ -236,113 +233,6 @@
     }
   }
 
-  /* ── Dynamic In-Tab Theater Mode (activates ONLY while playing) ── */
-  function setTheaterMode(active) {
-    if (!video) return;
-    if (active) {
-      if (!theaterActive) {
-        video.classList.add('fr-clean-theater');
-        theaterActive = true;
-        if (window !== window.top) {
-          chrome.runtime.sendMessage({ type: 'activate-theater' }).catch(() => {});
-        }
-      }
-    } else {
-      if (theaterActive) {
-        video.classList.remove('fr-clean-theater');
-        theaterActive = false;
-        if (window !== window.top) {
-          chrome.runtime.sendMessage({ type: 'deactivate-theater' }).catch(() => {});
-        }
-      }
-    }
-  }
-
-  /* ── Hide player controls (ONLY when video is actively playing) ── */
-  function hidePlayerControls() {
-    if (controlsHidden) return;
-    if (video && video.paused) return; // Never hide controls while paused!
-
-    if (video) {
-      try {
-        video.controls = false;
-        video.removeAttribute('controls');
-      } catch (_) {}
-    }
-
-    const style = document.createElement('style');
-    style.id = 'frame-recorder-hide-controls';
-    style.textContent = `
-      video::-webkit-media-controls { display: none !important; opacity: 0 !important; }
-      video::-webkit-media-controls-enclosure { display: none !important; opacity: 0 !important; }
-      video::-webkit-media-controls-panel { display: none !important; opacity: 0 !important; }
-
-      /* EzyCourse / iSkills / React LMS player controls & overlays */
-      ._video_control_bar,
-      [class*="course_player_controls" i],
-      [class*="video_controls" i],
-      [class*="videoControls" i],
-      [class*="control_bar" i],
-      [class*="controlBar" i],
-      [class*="control-bar" i],
-      [class*="controls-bar" i],
-      [class*="player_control" i],
-      [class*="playerControl" i],
-      [class*="player_bottom" i],
-      [class*="bottom_controls" i],
-      [class*="bottomControls" i],
-      [class*="controls_container" i],
-      [class*="controls_wrapper" i],
-      [class*="timeline" i],
-      [class*="scrubber" i],
-      [class*="progressbar" i],
-      [class*="progress_bar" i],
-      [class*="progress-bar" i],
-
-      /* Plyr */
-      .plyr__controls,
-      .plyr__control,
-      .plyr__poster,
-      .plyr__captions,
-
-      /* Video.js */
-      .vjs-control-bar,
-      .vjs-loading-spinner,
-      .vjs-big-play-button,
-      .vjs-poster,
-      .vjs-text-track-display,
-      .vjs-overlay,
-
-      /* BunnyCDN & Bitmovin UI */
-      .bmpui-ui-uicontainer,
-      .bmpui-controlbar,
-      .bmpui-ui-watermark,
-      .bmpui-ui-buffering-overlay,
-      .bmpui-ui-playbacktoggle-overlay,
-      .bmpui-ui-poster,
-      .bmpui-ui-titlebar,
-      .bmpui-ui-subtitle-overlay,
-      .bmpui-ui-settings-panel,
-      .bmpui-ui-controlbar,
-      #player-overlay,
-      .bunnyCdnPlayer__controls,
-      .bunnyCdnPlayer__watermark,
-      .bunnyCdnPlayer__loading,
-      [data-testid="player-controls"] {
-        opacity: 0 !important;
-        pointer-events: none !important;
-      }
-    `;
-    document.head.append(style);
-    controlsHidden = true;
-  }
-
-  /* ── Restore player controls ────────────────────────────────── */
-  function restorePlayerControls() {
-    document.getElementById('frame-recorder-hide-controls')?.remove();
-    controlsHidden = false;
-  }
-
   /* ── Choose the largest video element ───────────────────────── */
   function choose() {
     const candidate = [...document.querySelectorAll('video')]
@@ -365,15 +255,7 @@
     ]) {
       const fn = () => {
         if (event === 'waiting') waiting = true;
-        if (event === 'playing') {
-          waiting = false;
-          setTheaterMode(true);
-          hidePlayerControls();
-        }
-        if (event === 'pause' || event === 'ended') {
-          setTheaterMode(false);
-          restorePlayerControls();
-        }
+        if (event === 'playing') waiting = false;
         send(event);
       };
       video.addEventListener(event, fn);
@@ -385,11 +267,6 @@
       video.preload = 'auto';
       video.setAttribute('preload', 'auto');
       injectMainWorldBooster();
-    } catch (_) {}
-
-    // Bring video into view cleanly
-    try {
-      video.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (_) {}
 
     // Auto-play on first attach
@@ -411,7 +288,7 @@
           video.muted = true;
           video.play().then(() => {
             setTimeout(() => { if (video) video.muted = false; }, 150);
-          });
+          }).catch(() => {});
         });
         dispatchFullClick(video);
       }
@@ -465,8 +342,6 @@
       if (autoPlayTimer) clearInterval(autoPlayTimer);
       observer.disconnect();
       for (const [el, event, fn] of listeners) el.removeEventListener(event, fn);
-      setTheaterMode(false);
-      restorePlayerControls();
       chrome.runtime.onMessage.removeListener(message);
       delete window.__frameRecorderMonitor;
       respond({ ok: true });
