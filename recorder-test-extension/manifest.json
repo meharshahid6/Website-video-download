@@ -1,11 +1,25 @@
 {
   "manifest_version": 3,
   "name": "Universal Video Course Recorder",
-  "version": "0.8.0",
+  "version": "0.9.6",
   "minimum_chrome_version": "116",
-  "description": "One-click clean 16:9 fullscreen lecture recorder with instant auto-play, zero black bars, and smart pause trimming.",
-  "permissions": ["activeTab", "tabCapture", "offscreen", "scripting", "downloads", "storage"],
-  "host_permissions": ["<all_urls>"],
-  "action": {"default_title": "Start / stop lecture recording"},
-  "background": {"service_worker": "background.js", "type": "module"}
+  "description": "Record only the visible lesson video with internal tab audio and automatic lesson-title filenames.",
+  "permissions": [
+    "activeTab",
+    "tabCapture",
+    "offscreen",
+    "scripting",
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Start / stop lecture recording"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
 }

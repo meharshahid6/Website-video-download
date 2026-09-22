@@ -8,7 +8,7 @@ outgoing=root.parent/'final-recordings';outgoing.mkdir(exist_ok=True)
 seen={}
 print('Watching completed recording downloads. Final MP4s: '+str(outgoing),flush=True)
 while True:
-    for report in incoming.glob('test-*.json'):
+    for report in incoming.glob('*.json'):
         source=report.with_name(report.stem+'.raw.webm')
         if not source.exists():continue
         fingerprint=(source.stat().st_size,source.stat().st_mtime_ns,report.stat().st_mtime_ns)

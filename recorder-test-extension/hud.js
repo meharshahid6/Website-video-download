@@ -9,6 +9,7 @@
     <div id="frhud-inner">
       <span id="frhud-dot"></span>
       <span id="frhud-status">WAIT</span>
+      <span id="frhud-health">Checking quality / audio</span>
       <span id="frhud-time">0:00</span>
       <span id="frhud-buf" title="Video buffered ahead in advance">⚡ 0s</span>
       <button id="frhud-play" title="Start video playback" style="display: none;">▶ Play</button>
@@ -166,7 +167,7 @@
       playBtn.style.display = 'inline-flex';
     } else {
       dot.className = 'hold';
-      statusEl.textContent = 'WAIT';
+      statusEl.textContent = ({'select-1080p-quality':'SELECT 1080p','waiting-for-quality-stable':'QUALITY CHECK','preparing-beginning':'REWINDING','buffering':'BUFFERING'})[currentStatus] || 'WAIT';
       playBtn.style.display = 'inline-flex';
     }
     timeEl.textContent = formatTime(recordingSeconds);
@@ -198,6 +199,22 @@
 
   /* ── Listen for status updates from background ──────────────── */
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+    if (msg.type === 'hud-health') hud.querySelector('#frhud-health').textContent = msg.label;
+    if (msg.type === 'hud-geometry') {
+      const r = msg.rect;
+      // Keep our overlay out of the captured video rectangle.
+      hud.style.setProperty('visibility','hidden','important');
+      if (r) {
+        const w = hud.offsetWidth, h = hud.offsetHeight;
+        const points = [[14,14],[14,innerHeight-h-14],[innerWidth-w-14,14],[innerWidth-w-14,innerHeight-h-14]];
+        const free = points.find(([x,y]) => x>=0 && y>=0 && (x+w<=r.x || x>=r.x+r.width || y+h<=r.y || y>=r.y+r.height));
+        if (free) {
+          hud.style.setProperty('left',free[0]+'px','important');
+          hud.style.setProperty('top',free[1]+'px','important');
+          hud.style.setProperty('visibility','visible','important');
+        }
+      }
+    }
     if (msg.type === 'hud-status') {
       if (msg.status === 'recording' && !playbackActive) {
         playbackActive = true;

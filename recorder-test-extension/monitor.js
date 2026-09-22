@@ -35,62 +35,6 @@
   }
 
   /* ── Main-world Buffer Booster Fallback ─────────────────────── */
-  function injectMainWorldBooster() {
-    if (document.getElementById('fr-buffer-booster-script')) return;
-    try {
-      const script = document.createElement('script');
-      script.id = 'fr-buffer-booster-script';
-      script.textContent = `
-        (() => {
-          if (window.__frBufferBoosterActive) return;
-          window.__frBufferBoosterActive = true;
-
-          function boost(obj) {
-            if (!obj || typeof obj !== 'object') return;
-            try {
-              if (obj.config) {
-                obj.config.maxBufferLength = 600;
-                obj.config.maxMaxBufferLength = 1200;
-                obj.config.maxBufferSize = 250 * 1024 * 1024;
-                obj.config.backBufferLength = 300;
-                obj.config.lowLatencyMode = false;
-                if (typeof obj.startLoad === 'function') obj.startLoad();
-              }
-            } catch (_) {}
-          }
-
-          if (window.Hls && window.Hls.DefaultConfig) {
-            window.Hls.DefaultConfig.maxBufferLength = 600;
-            window.Hls.DefaultConfig.maxMaxBufferLength = 1200;
-            window.Hls.DefaultConfig.maxBufferSize = 250 * 1024 * 1024;
-            window.Hls.DefaultConfig.backBufferLength = 300;
-          }
-
-          function scan() {
-            document.querySelectorAll('video').forEach(v => {
-              try {
-                v.preload = 'auto';
-                if (v._hls) boost(v._hls);
-                if (v.hls) boost(v.hls);
-                if (v.player) boost(v.player);
-                if (v._player) boost(v._player);
-              } catch (_) {}
-            });
-            ['player', 'hls', 'hlsPlayer', 'dp', 'art', 'jwplayer'].forEach(k => {
-              try { if (window[k]) boost(window[k]); } catch (_) {}
-            });
-          }
-
-          scan();
-          setInterval(scan, 2000);
-        })();
-      `;
-      (document.head || document.documentElement).appendChild(script);
-      script.remove();
-    } catch (_) {}
-  }
-
-  /* ── Send player state to background ────────────────────────── */
   function send(event = 'heartbeat') {
     if (!video || !video.isConnected) return;
     const data = {
@@ -266,7 +210,6 @@
     try {
       video.preload = 'auto';
       video.setAttribute('preload', 'auto');
-      injectMainWorldBooster();
     } catch (_) {}
 
     // Auto-play on first attach
@@ -277,10 +220,38 @@
   /* ── DOM observer + heartbeat ───────────────────────────────── */
   const observer = new MutationObserver(choose);
   observer.observe(document.documentElement, { childList: true, subtree: true });
+  const onLayout = () => send('layout');
+  window.addEventListener('scroll', onLayout, true);
+  window.addEventListener('resize', onLayout);
   const interval = setInterval(() => { choose(); send(); }, 1000);
 
   /* ── Message handler ────────────────────────────────────────── */
   const message = (msg, _sender, respond) => {
+    if (msg.type === 'prepare-beginning') {
+      (async () => {
+        if (!video || !Number.isFinite(video.duration)) throw Error('Restart requires a seekable recorded lesson.');
+        const target = video;
+        if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+        target.pause();
+        if (target.currentTime > 0.05) {
+          await new Promise((resolve,reject) => {
+            const done = () => { clearTimeout(timer); target.removeEventListener('seeked',done); resolve(); };
+            const timer = setTimeout(() => { target.removeEventListener('seeked',done); reject(Error('Could not seek to the lesson beginning.')); },10000);
+            target.addEventListener('seeked',done);
+            target.currentTime = 0;
+          });
+        }
+        if (target.currentTime > 0.1) throw Error('Player did not return to the beginning.');
+        send('prepared');
+        return {ok:true};
+      })().then(respond,error=>respond({error:error.message}));
+      return true;
+    }
+    if (msg.type === 'play-prepared') {
+      if (!video) { respond({error:'Player unavailable.'}); return; }
+      video.play().then(()=>respond({ok:true}),error=>respond({error:error.message}));
+      return true;
+    }
     // Explicit user play click from HUD button
     if (msg.type === 'hud-play-now') {
       if (video) {
@@ -302,28 +273,20 @@
       let iframe = null;
 
       if (wanted) {
-        iframe = iframes.find(el => {
+        const matches = iframes.filter(el => {
           try {
-            const u = new URL(el.src);
-            return u.origin === wanted.origin && u.pathname === wanted.pathname;
-          } catch { return false; }
-        }) || iframes.find(el => {
-          try {
-            const u = new URL(el.src);
-            return u.origin === wanted.origin;
+            const u = new URL(el.src,location.href);
+            return u.origin === wanted.origin && u.pathname === wanted.pathname && u.search === wanted.search;
           } catch { return false; }
         });
+        if (matches.length === 1) iframe = matches[0];
       }
 
-      if (!iframe) {
-        iframe = iframes.find(el => el.clientWidth >= 300 && el.clientHeight >= 180) || iframes[0];
-      }
+      // Ambiguous iframe matches must not fall back to the whole page.
+
 
       if (!iframe) {
-        respond({
-          x: 0, y: 0, width: innerWidth, height: innerHeight,
-          viewport: { width: innerWidth, height: innerHeight }
-        });
+        respond(null);
         return;
       }
 
@@ -339,6 +302,8 @@
 
     if (msg.type === 'monitor-stop') {
       clearInterval(interval);
+      window.removeEventListener('scroll', onLayout, true);
+      window.removeEventListener('resize', onLayout);
       if (autoPlayTimer) clearInterval(autoPlayTimer);
       observer.disconnect();
       for (const [el, event, fn] of listeners) el.removeEventListener(event, fn);

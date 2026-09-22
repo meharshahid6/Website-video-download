@@ -88,6 +88,14 @@ def finalize(source,report_path,destination):
     try:
         _finalize(source,report_path,pending)
         verified=json.loads(pending_report.read_text());verified['output']=str(destination)
+        counts={'video':0,'audio':0}
+        with av.open(str(pending)) as check:
+            for frame in check.decode():
+                kind='audio' if isinstance(frame,av.AudioFrame) else 'video'
+                counts[kind]+=1
+        if not all(counts.values()):raise ValueError('Final MP4 validation failed: missing decodable video or audio.')
+        verified['status']='verified-mp4'
+        verified['decodedFrames']=counts
         pending.replace(destination)
         destination.with_suffix('.verification.json').write_text(json.dumps(verified,indent=2))
     finally:

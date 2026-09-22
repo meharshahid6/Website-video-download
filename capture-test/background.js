@@ -1,4 +1,17 @@
+import { safeTitle } from './common.js';
 let session = null;
+let saving = false;
+async function waitForDownload(id) {
+  const deadline = Date.now()+300000;
+  while (Date.now() < deadline) {
+    const [item] = await chrome.downloads.search({id});
+    if (!item) throw Error('Download disappeared. Check Chrome Downloads.');
+    if (item.state === 'complete') return;
+    if (item.state === 'interrupted') throw Error('Download interrupted: '+(item.error || 'unknown error'));
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  throw Error('Download still pending. Check Chrome Downloads.');
+}
 
 /* ── Badge helpers ─────────────────────────────────────────────── */
 const badge = (text, color = '#236c49') => {
@@ -16,7 +29,7 @@ async function reportFailure(error, stage = 'startup') {
   const detail = error?.message || String(error);
   badgeErr();
   await chrome.action.setTitle({ title: 'Recording error: ' + detail });
-  const report = { build: '0.8.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
+  const report = { build: '0.9.6', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
   await chrome.storage.local.set({ lastError: detail, lastFailure: report });
   const name = 'FrameCaptureTests/error-' + report.at.replace(/[:.]/g, '-') + '.json';
   try {
@@ -85,6 +98,24 @@ function runMainWorldBufferBooster() {
 
 /* ── Extract lesson title from page DOM ─────────────────────────── */
 function extractLessonTitle() {
+  // Prefer the visible heading directly above the largest player, outside navigation.
+  const visible = el => {
+    const r = el.getBoundingClientRect();
+    const css = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && css.visibility !== 'hidden' && css.display !== 'none';
+  };
+  const players = [...document.querySelectorAll('video, iframe')].filter(visible)
+    .sort((a,b) => b.getBoundingClientRect().width*b.getBoundingClientRect().height-a.getBoundingClientRect().width*a.getBoundingClientRect().height);
+  const player = players[0]?.getBoundingClientRect();
+  const headings = [...document.querySelectorAll('h1,h2,h3,h4,[class*="lesson-title" i],[class*="lesson_title" i],[class*="lessonTitle" i],[class*="lecture-title" i]')]
+    .filter(el => visible(el) && !el.closest('aside,nav,[role="navigation"],#frame-recorder-hud,[class*="sidebar" i]'))
+    .map(el => ({text:(el.innerText || el.textContent || '').replace(/\s+/g,' ').trim(),rect:el.getBoundingClientRect()}))
+    .filter(item => item.text.length > 2 && item.text.length < 240);
+  if (player) {
+    const above = headings.filter(({rect}) => rect.bottom <= player.top+12 && player.top-rect.bottom < 320 && rect.right>player.left && rect.left<player.right)
+      .sort((a,b) => Math.abs(player.top-a.rect.bottom)-Math.abs(player.top-b.rect.bottom));
+    if (above.length) return above[0].text;
+  }
   // 1. EzyCourse / iSkills: The active lesson in the sidebar has a blue dot / active state
   //    The lesson name "Niche research through Flippa" appears near the top header area
   const titleSelectors = [
@@ -145,7 +176,10 @@ function extractLessonTitle() {
 
 /* ── Cleanup: remove HUD and stop monitor ──────────────────────── */
 async function cleanup(tabId) {
+  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'MAIN',func:()=>{clearInterval(window.__frQualityTimer);delete window.__frQualityTimer;}}).catch(()=>{});
   await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
+    window.__frRemoveControls?.();
+    window.__frRestoreTheater?.();
     document.getElementById('frame-recorder-hud')?.remove();
   }}).catch(() => {});
   await chrome.tabs.sendMessage(tabId, { type: 'monitor-stop' }).catch(() => {});
@@ -154,6 +188,7 @@ async function cleanup(tabId) {
 /* ── Extension icon click handler ────────────────────────────── */
 chrome.action.onClicked.addListener(async tab => {
   try {
+    if (saving) return;
     // Recover any stale session
     if (!session) session = (await chrome.storage.session.get('testSession')).testSession || null;
 
@@ -185,26 +220,16 @@ chrome.action.onClicked.addListener(async tab => {
       if (result?.[0]?.result) lessonTitle = result[0].result;
     } catch (_) {}
 
-    // Build file prefix: SiteName_LessonTitle
-    let siteName = 'Video';
-    try {
-      const host = new URL(tab.url).hostname.replace(/^www\./, '').split('.')[0];
-      if (host) siteName = host.charAt(0).toUpperCase() + host.slice(1);
-    } catch (_) {}
-
-    const cleanTitle = lessonTitle
-      .replace(/[^\w\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '_')
-      .slice(0, 60);
-
-    const filePrefix = `${siteName}_${cleanTitle || 'Lecture'}`;
+    const filePrefix = safeTitle(lessonTitle);
 
     // Start session — NO window fullscreen, page stays exactly as user sees it
-    session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix };
+    session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix, lessonTitle, titleLocked: lessonTitle !== 'Lecture' };
     await chrome.storage.session.set({ testSession: session });
     badgeWait();
     await chrome.action.setTitle({ title: 'Preparing recording...' });
+
+    // Expand only page content: no OS/browser fullscreen API.
+    await chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},files:['theater.js']});
 
     // Create offscreen document for recording
     const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
@@ -217,7 +242,9 @@ chrome.action.onClicked.addListener(async tab => {
 
     // Get tab capture stream ID
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-    const startResult = await chrome.runtime.sendMessage({ to: 'recorder', type: 'start', streamId });
+    const viewportResult = await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>({width:innerWidth,height:innerHeight})});
+    const viewport = viewportResult[0]?.result;
+    const startResult = await chrome.runtime.sendMessage({ to: 'recorder', type: 'start', streamId, viewport });
     if (startResult?.error) throw Error(startResult.error);
 
     // Inject Buffer Booster into MAIN world across all frames
@@ -226,6 +253,8 @@ chrome.action.onClicked.addListener(async tab => {
       world: 'MAIN',
       func: runMainWorldBufferBooster
     }).catch(() => {});
+
+    await chrome.scripting.executeScript({target:{tabId:tab.id,allFrames:true},world:'MAIN',files:['quality.js']}).catch(()=>{});
 
     // Inject monitor (auto-play + geometry tracking) and HUD into tab
     await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ['monitor.js'] });
@@ -243,16 +272,42 @@ chrome.action.onClicked.addListener(async tab => {
 /* ── Message router ──────────────────────────────────────────── */
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg.to === 'recorder') return;
+  if (['prepare-beginning','play-prepared'].includes(msg.type) && !sender.tab) {
+    (async()=>{
+      if (!session) session = (await chrome.storage.session.get('testSession')).testSession;
+      if (!session || session.frameId == null) throw Error('Recording player unavailable.');
+      return chrome.tabs.sendMessage(session.tabId,{type:msg.type},{frameId:session.frameId});
+    })().then(respond,error=>respond({error:error.message}));
+    return true;
+  }
 
   (async () => {
     if (!session) session = (await chrome.storage.session.get('testSession')).testSession || null;
 
+    if (msg.type === 'recorder-health' && !sender.tab && session && !saving) {
+      const h = msg.data;
+      const source = h.sourceWidth ? `${h.sourceWidth}x${h.sourceHeight}` : 'waiting';
+      const output = h.outputSize ? `${h.outputSize.width}x${h.outputSize.height}` : 'waiting';
+      const warning = h.outputSize && h.sourceHeight < 1080 ? ' - QUALITY DROPPED' : '';
+      const label = `Source: ${source} | Saved: ${output} | Audio: ${h.audio}${warning}`;
+      await chrome.storage.local.set({recorderHealth:{...h,at:Date.now()}});
+      await chrome.action.setTitle({title:label});
+      if (warning) badge('LOW','#ca8a04');
+      else if (h.status === 'recording') badgeRec();
+      await chrome.tabs.sendMessage(session.tabId,{type:'hud-health',label}).catch(()=>{});
+    }
     /* Player state from monitor.js */
     if (msg.type === 'player-state' && session && sender.tab?.id === session.tabId) {
       if (session.frameId !== null && session.frameId !== sender.frameId) return;
       const data = msg.data;
       if (!data.sourceWidth || !data.rect.width) return;
       session.frameId = sender.frameId;
+      if (!session.titleLocked && !data.paused && data.readyState >= 3) {
+        const titles = await chrome.scripting.executeScript({target:{tabId:session.tabId},func:extractLessonTitle}).catch(() => []);
+        session.lessonTitle = titles[0]?.result || session.lessonTitle;
+        session.filePrefix = safeTitle(session.lessonTitle);
+        session.titleLocked = true; // Keep this lesson's name even if the site auto-advances at ended.
+      }
       await chrome.storage.session.set({ testSession: session });
 
       // Forward live buffer info to on-page HUD
@@ -279,8 +334,12 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
             height: data.rect.height * sy
           };
           data.viewport = parent.viewport;
+        } else {
+          data.geometryError = 'Could not locate video iframe in the page.';
         }
       }
+      chrome.tabs.sendMessage(session.tabId,{type:'hud-geometry',rect:data.geometryError?null:data.rect}).catch(()=>{});
+      data.lessonTitle = session.lessonTitle;
       await chrome.runtime.sendMessage({ to: 'recorder', type: 'state', data });
     }
 
@@ -316,23 +375,22 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
     /* Save completed recording */
     if (msg.type === 'save-test' && !sender.tab) {
+      saving = true;
+      badge('SAVE','#2563eb');
+      await chrome.action.setTitle({title:'Saving recording - waiting for downloads to complete...'});
       const prefix = session?.filePrefix || 'Video';
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const base = `FrameCaptureTests/${prefix}_${timestamp}`;
-      let error = null;
+      const base = `FrameCaptureTests/${prefix}`;
+      let error = msg.videoUrl ? null : 'No video was recorded. ' + (msg.summary?.diagnostic || msg.summary?.stopReason || 'Check player status.');
       try {
-        if (msg.videoUrl) {
-          chrome.downloads.download({ url: msg.videoUrl, filename: base + '.raw.webm', saveAs: false }, () => {
-            if (chrome.runtime.lastError) console.warn('Video download error:', chrome.runtime.lastError.message);
-          });
-        }
-        if (msg.reportUrl) {
-          setTimeout(() => {
-            chrome.downloads.download({ url: msg.reportUrl, filename: base + '.json', saveAs: false }, () => {
-              if (chrome.runtime.lastError) console.warn('Report download error:', chrome.runtime.lastError.message);
-            });
-          }, 350);
-        }
+        // Await both downloads being accepted. Keep blob URLs alive until the next session.
+        // One shared suffix protects raw/report pairing on repeat recordings.
+        const earlier = await chrome.downloads.search({query:[base]});
+        const suffix = earlier.length ? ' (' + Date.now() + ')' : '';
+        const saveBase = base + suffix;
+        const ids = [];
+        if (msg.videoUrl) ids.push(await chrome.downloads.download({url:msg.videoUrl,filename:saveBase+'.raw.webm',saveAs:false}));
+        if (msg.reportUrl) ids.push(await chrome.downloads.download({url:msg.reportUrl,filename:saveBase+'.json',saveAs:false}));
+        await Promise.all(ids.map(waitForDownload));
       } catch (e) { error = e.message; }
 
       // Cleanup session
@@ -341,8 +399,13 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       await chrome.storage.session.remove('testSession');
 
       await chrome.storage.local.set({ lastSave: { at: new Date().toISOString(), base, error } });
-      setTimeout(() => chrome.offscreen.closeDocument().catch(() => {}), 1500);
+      saving = false;
+      badge(error ? 'ERR' : 'DONE', error ? '#b3261e' : '#16a34a');
+      await chrome.action.setTitle({title:error || 'Raw video and report downloaded. Final MP4 is prepared separately.'});
     }
-  })();
+  })().then(() => respond({ok:true}), error => {
+    console.error('Recorder message failed:',error);
+    respond({error:error.message});
+  });
   return true;
 });

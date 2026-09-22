@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
 const path=require('node:path');
-const code=fs.readFileSync(path.join(__dirname,'../recorder-test-extension/background.js'),'utf8');
+const code=fs.readFileSync(path.join(__dirname,'../recorder-test-extension/background.js'),'utf8').replace(/^import .*;\r?\n/, '');
 function harness({storedSession=null,captureError=null,startError=null}={}){
   const saved={testSession:storedSession},downloads=[],injections=[],messages=[];let clicked;
   const chrome={
@@ -16,7 +16,7 @@ function harness({storedSession=null,captureError=null,startError=null}={}){
     tabs:{sendMessage:async()=>({ok:true}),onRemoved:{addListener:()=>{}}},
     downloads:{download:async d=>{downloads.push(d);return 1}}
   };
-  vm.runInNewContext(code,{chrome,console,URL});
+  vm.runInNewContext(code,{chrome,console,URL,safeTitle:s=>s});
   return {run:()=>clicked({id:17,url:'https://learn.sarmaaya.pk/student/courses/46871/watch/'}),saved,downloads,injections,messages};
 }
 test('capture setup failure writes readable diagnostics and clears session',async()=>{
