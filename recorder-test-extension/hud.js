@@ -128,6 +128,8 @@
     return m + ':' + String(s).padStart(2, '0');
   }
 
+  let hasStartedRecording = false;
+
   function updateDisplay() {
     if (currentStatus === 'recording') {
       dot.className = 'recording';
@@ -135,6 +137,12 @@
     } else if (currentStatus === 'finished') {
       dot.className = 'done';
       statusEl.textContent = 'DONE';
+    } else if (!hasStartedRecording) {
+      dot.className = 'hold';
+      statusEl.textContent = 'WAIT';
+    } else if (currentStatus === 'paused') {
+      dot.className = 'hold';
+      statusEl.textContent = 'PAUSE';
     } else {
       dot.className = 'hold';
       statusEl.textContent = 'HOLD';
@@ -162,8 +170,12 @@
   /* ── Listen for status updates from background ──────────────── */
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (msg.type === 'hud-status') {
+      if (msg.status === 'recording' && !hasStartedRecording) {
+        hasStartedRecording = true;
+        recordingSeconds = 0;
+        lastTick = Date.now();
+      }
       currentStatus = msg.status;
-      if (!lastTick) lastTick = Date.now();
       updateDisplay();
     }
     if (msg.type === 'hud-buffer' && typeof msg.bufferedAhead === 'number') {

@@ -220,8 +220,15 @@ async function prepare(tabId) {
   }});
 }
 
-/* ── Cleanup: restore page state ──────────────────────────────── */
+/* ── Cleanup: restore page state and window ─────────────────────── */
 async function cleanup(tabId) {
+  // Restore window state if it was fullscreened for recording
+  if (session?.windowId && session?.originalWindowState && session.originalWindowState !== 'fullscreen') {
+    try {
+      await chrome.windows.update(session.windowId, { state: session.originalWindowState });
+    } catch (_) {}
+  }
+
   await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
     // Restore target element in main frame
     const marker = document.getElementById('frame-recorder-restore');
@@ -291,8 +298,19 @@ chrome.action.onClicked.addListener(async tab => {
 
     const filePrefix = `${siteName}_${cleanTitle || 'Lecture'}`;
 
+    // Switch window to Fullscreen mode so the viewport is native 1920x1080 (16:9) with zero black bars
+    let originalWindowState = 'maximized';
+    try {
+      const win = await chrome.windows.get(tab.windowId);
+      originalWindowState = win.state || 'maximized';
+      if (originalWindowState !== 'fullscreen') {
+        await chrome.windows.update(tab.windowId, { state: 'fullscreen' });
+        await new Promise(r => setTimeout(r, 450));
+      }
+    } catch (_) {}
+
     // Start new session
-    session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix };
+    session = { tabId: tab.id, windowId: tab.windowId, originalWindowState, frameId: null, started: Date.now(), filePrefix };
     await chrome.storage.session.set({ testSession: session });
     badgeWait();
     await chrome.action.setTitle({ title: 'Preparing recording...' });
@@ -404,50 +422,28 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       }
     }
 
-    /* Save completed recording — sequenced downloads to avoid Chrome suppression */
+    /* Save completed recording */
     if (msg.type === 'save-test' && !sender.tab) {
       const prefix = session?.filePrefix || 'Video';
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const base = `FrameCaptureTests/${prefix}_${timestamp}`;
       let error = null;
       try {
-        // Download WebM first, then JSON report sequentially
         if (msg.videoUrl) {
-          await new Promise((resolve, reject) => {
-            chrome.downloads.download({ url: msg.videoUrl, filename: base + '.raw.webm', saveAs: false }, id => {
-              if (chrome.runtime.lastError) { reject(Error(chrome.runtime.lastError.message)); return; }
-              const listener = delta => {
-                if (delta.id === id && delta.state?.current === 'complete') {
-                  chrome.downloads.onChanged.removeListener(listener);
-                  resolve();
-                } else if (delta.id === id && delta.state?.current === 'interrupted') {
-                  chrome.downloads.onChanged.removeListener(listener);
-                  reject(Error('Video download interrupted'));
-                }
-              };
-              chrome.downloads.onChanged.addListener(listener);
-            });
+          chrome.downloads.download({ url: msg.videoUrl, filename: base + '.raw.webm', saveAs: false }, () => {
+            if (chrome.runtime.lastError) console.warn('Video download error:', chrome.runtime.lastError.message);
           });
         }
-        // Now save JSON report after WebM is confirmed saved
-        await new Promise((resolve, reject) => {
-          chrome.downloads.download({ url: msg.reportUrl, filename: base + '.json', saveAs: false }, id => {
-            if (chrome.runtime.lastError) { reject(Error(chrome.runtime.lastError.message)); return; }
-            const listener = delta => {
-              if (delta.id === id && delta.state?.current === 'complete') {
-                chrome.downloads.onChanged.removeListener(listener);
-                resolve();
-              } else if (delta.id === id && delta.state?.current === 'interrupted') {
-                chrome.downloads.onChanged.removeListener(listener);
-                reject(Error('Report download interrupted'));
-              }
-            };
-            chrome.downloads.onChanged.addListener(listener);
-          });
-        });
+        if (msg.reportUrl) {
+          setTimeout(() => {
+            chrome.downloads.download({ url: msg.reportUrl, filename: base + '.json', saveAs: false }, () => {
+              if (chrome.runtime.lastError) console.warn('Report download error:', chrome.runtime.lastError.message);
+            });
+          }, 350);
+        }
       } catch (e) { error = e.message; }
 
-      // Cleanup session
+      // Cleanup session & restore window state
       if (session) await cleanup(session.tabId);
       session = null;
       await chrome.storage.session.remove('testSession');

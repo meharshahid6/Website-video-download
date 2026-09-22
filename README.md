@@ -1,19 +1,20 @@
-# Universal Video Course Recorder (v0.5.0 - Advance Buffer Booster)
+# Universal Video Course Recorder (v0.6.0 - Pristine Fullscreen & Instant Auto-Play)
 
-Chrome extension and local processing pipeline for one-click clean recording and extraction of lecture videos across any educational platform (iSkills, Sarmaaya, EzyCourse, Coursera, Udemy, YouTube, Vimeo, Wistia, etc.) with advance buffer boosting and telemetry-based trimming.
+Chrome extension and local processing pipeline for one-click clean recording and extraction of lecture videos across any educational platform (iSkills, Sarmaaya, EzyCourse, Coursera, Udemy, YouTube, Vimeo, Wistia, etc.) with pristine 16:9 fullscreen output, zero black bars, and instant auto-play.
 
-## Features (v0.5.0)
+## Features (v0.6.0)
 
-- **Advance Buffer Booster (Anti-Disconnect Preloader)**: Injects main-world scripts and video preloading directives to force players (HLS.js, Video.js/VHS, Bitmovin, HTML5) to buffer up to 10-20 minutes of video in advance. Keeps playing smoothly even if the internet drops temporarily!
-- **Live Buffer HUD Indicator**: On-screen HUD displays real-time advance buffer (`⚡ 3m 45s buf`) with color-coded safety indicators (green = healthy buffer > 60s, sky blue = good, yellow = buffering).
+- **Pristine 16:9 Fullscreen (Zero Black Bars)**: Automatically switches window into fullscreen during capture so the tab viewport matches 1920x1080 (16:9) exactly. Eliminates all top/bottom letterbox and left/right pillarbox black bars. Automatically restores original window size when finished.
+- **Active Playback Recording (Zero Paused Static Lead-in)**: Discards pre-playback paused frames. Recording chunks accumulate only from the exact millisecond the lecture starts playing. HUD stays on `WAIT` and starts `REC 0:00` right with the video.
+- **Instant Multi-Engine Auto-Play**: Automatically plays videos upon extension click:
+  - Chrome Autoplay Policy bypass (instant muted play with 150ms unmute)
+  - Synthetic pointer events (`pointerdown`, `mousedown`, `pointerup`, `mouseup`, `click`) dispatched on center play buttons and bottom controls
+  - Broad selector support for LMS players, EzyCourse, Plyr, Video.js, BunnyCDN/Bitmovin
+  - Continuous 500ms retry pump until playback is confirmed
+- **Enhanced Player Controls Hiding**: Removes native HTML5 controls attribute and injects opacity-based suppression to cleanly hide playback bars, scrubbers, volume sliders, and overlay buttons across all platforms.
+- **Advance Buffer Booster (Anti-Disconnect Preloader)**: Injects main-world scripts and video preloading directives to force players (HLS.js, Video.js/VHS, Bitmovin, HTML5) to buffer up to 10-20 minutes of video in advance.
+- **Live Buffer HUD Indicator**: On-screen HUD displays real-time advance buffer (`⚡ 3m 45s buf`) with color-coded safety indicators.
 - **Universal / Global Support**: Works on any website (`<all_urls>`). Tested on `app.iskills.com` and `learn.sarmaaya.pk`.
-- **One-Click Auto-Play**: Automatically plays the video upon extension click:
-  - Direct HTML5 `video.play()`
-  - Center-point element detection (`document.elementFromPoint(cx, cy)`) to click custom player play buttons (e.g. iSkills circular blue play button)
-  - Broad selector support for LMS players, Plyr, Video.js, BunnyCDN/Bitmovin, and custom overlays
-- **Universal Clean View**: Automatically isolates the video element or player iframe to 100vw x 100vh (`z-index: 2147483645`), cleanly hiding curriculum sidebars, headers, bottom action bars, and page scrollbars.
-- **Player Controls Hiding**: Hides playback bars, scrubbers, volume sliders, and play button overlays during active recording for pristine captures. Controls restore automatically when stopped.
-- **On-Page HUD**: Non-intrusive live status overlay (`REC`, `HOLD`, recording timer, advance buffer indicator, and stop button `■`) in the top-left corner.
 - **Smart Named Downloads**: Automatically names downloads using the platform name and lesson title (e.g. `Downloads/FrameCaptureTests/Iskills_SEBT_NEXT_2026-09-22T01-15-00.raw.webm`).
 - **Full Lecture Support**: No arbitrary time limit. Auto-stops when the video finishes, or when manually stopped via the icon or HUD.
 - **Internal Tab Audio**: Tab audio captured directly without microphone access or speaker interference. Works even when Windows speakers are muted.

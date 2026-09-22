@@ -2,6 +2,7 @@ import { gate } from './common.js';
 
 // Record the native stream continuously; crop and trim locally after recording.
 let raw, recorder, worker, started = 0, recordingStarted = 0, ended = false, lastState;
+let playbackHasStarted = false;
 let chunks = [], events = [], geometry = [], previous = '', lastReceived = 0, lastGeometry = '';
 let captureSettings, stopReason = '';
 
@@ -13,6 +14,14 @@ function update() {
   // Player telemetry lost for >5 seconds
   if (lastState && Date.now() - lastReceived > 5000) state = 'player-state-unavailable';
 
+  // Mark playback start when video actually begins playing
+  if (state === 'recording') {
+    if (!playbackHasStarted) {
+      playbackHasStarted = true;
+      recordingStarted = Date.now();
+    }
+  }
+
   // Auto-stop when video ends
   if (state === 'ended') { finish('video-ended'); return; }
 
@@ -20,16 +29,22 @@ function update() {
   if (state !== previous) {
     previous = state;
     events.push({
-      captureMs: Date.now() - recordingStarted,
+      captureMs: recordingStarted ? Date.now() - recordingStarted : 0,
       status: state,
       sourceTime: lastState?.currentTime
     });
-    chrome.runtime.sendMessage({ type: 'recorder-status', status: state }).catch(() => {});
+    chrome.runtime.sendMessage({
+      type: 'recorder-status',
+      status: state,
+      playbackHasStarted
+    }).catch(() => {});
   }
 }
 
 async function start(streamId) {
   started = Date.now();
+  recordingStarted = 0;
+  playbackHasStarted = false;
 
   // Capture native tab stream — capped at 1920x1080 @ 30fps
   raw = await navigator.mediaDevices.getUserMedia({
@@ -65,12 +80,20 @@ async function start(streamId) {
     ...(hasAudio ? { audioBitsPerSecond: 128_000 } : {})
   });
 
-  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); update(); };
+  // Discard pre-playback paused chunks so recording starts right with the video
+  recorder.ondataavailable = e => {
+    if (!e.data.size) return;
+    if (!playbackHasStarted) {
+      update();
+      return;
+    }
+    chunks.push(e.data);
+    update();
+  };
   recorder.onstop = save;
   recorder.onerror = e => finish(e.error?.message || 'Recorder failed');
 
-  recordingStarted = Date.now();
-  recorder.start(2000); // 2-second chunks for less overhead
+  recorder.start(1000); // 1-second chunks for fast responsive capture
 
   // Auto-stop if capture track ends (tab closed, etc.)
   raw.getVideoTracks()[0].onended = () => finish('capture-ended');
@@ -96,7 +119,7 @@ async function save() {
   raw?.getTracks().forEach(t => t.stop());
 
   const report = {
-    testBuild: '0.5.0',
+    testBuild: '0.6.0',
     strategy: 'continuous-capture-then-trim',
     cropAfterCapture: true,
     stopReason,

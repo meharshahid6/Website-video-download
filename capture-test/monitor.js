@@ -117,23 +117,51 @@
     chrome.runtime.sendMessage({ type: 'player-state', data }).catch(() => {});
   }
 
-  /* ── Auto-play the video (universal multi-strategy) ─────────── */
+  /* ── Universal Instant Auto-Play Engine ─────────────────────── */
+  let autoPlayTimer = null;
   let autoPlayAttempts = 0;
+
+  function dispatchClick(el) {
+    if (!el) return;
+    try {
+      const target = el.closest('button, [role="button"], a, div') || el;
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      });
+      if (typeof target.click === 'function') target.click();
+    } catch (_) {}
+  }
+
   function autoPlay() {
     if (!video) return;
     // Ensure 1x playback rate
     if (video.playbackRate !== 1) video.playbackRate = 1;
     // Already playing
-    if (!video.paused && !video.ended) return;
+    if (!video.paused && !video.ended) {
+      if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+      return;
+    }
     if (video.ended) return;
 
     autoPlayAttempts++;
 
-    // Strategy 1: Direct play() call
-    const playPromise = video.play();
-    if (playPromise) {
-      playPromise.catch(() => {
-        // Strategy 2: Click center of the video (hits custom center play buttons like iSkills blue circle)
+    // 1. Direct unmuted play
+    const p = video.play();
+    if (p) {
+      p.then(() => {
+        if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+      }).catch(async () => {
+        // 2. Immediate Muted-Autoplay Bypass (Chrome policy 100% permits muted autoplay)
+        try {
+          video.muted = true;
+          await video.play();
+          // Video is playing! Unmute after 150ms
+          setTimeout(() => { if (video) video.muted = false; }, 150);
+          if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
+          return;
+        } catch (_) {}
+
+        // 3. Click center of the video (custom center buttons like iSkills circular blue play button)
         try {
           const r = video.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) {
@@ -141,67 +169,48 @@
             const cy = r.top + r.height / 2;
             const centerEl = document.elementFromPoint(cx, cy);
             if (centerEl && centerEl !== video) {
-              centerEl.click();
-              centerEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+              dispatchClick(centerEl);
             }
           }
         } catch (_) {}
 
-        // Strategy 3: Click common play button selectors across LMS platforms (iSkills, EzyCourse, Bunny, Plyr, Video.js)
-        setTimeout(() => {
-          if (!video || !video.paused) return;
+        // 4. Click all known play buttons in DOM (EzyCourse, iSkills, Plyr, Video.js, Bunny, custom buttons)
+        const selectors = [
+          '._video_play_btn', '.play-button', '.play_btn', '[class*="play_btn" i]',
+          '[class*="play-btn" i]', '[class*="playBtn" i]', '[class*="video_play" i]',
+          '[class*="play_icon" i]', '[class*="playIcon" i]',
+          '.bmpui-ui-playbacktoggle-overlay', '.bmpui-ui-hugeplaybacktogglebutton',
+          '.vjs-big-play-button', '.vjs-play-control', '.plyr__control--overlaid',
+          '[data-plyr="play"]', '[aria-label="Play" i]', '[aria-label*="play" i]',
+          '[title="Play" i]', '[title*="play" i]',
+          'button[class*="play" i]', 'div[role="button"][class*="play" i]',
+          '[class*="play-pause" i]', '[class*="play_pause" i]',
+          '._video_control_bar button', '[class*="control_bar" i] button',
+          '[class*="player_control" i] button', '[class*="controls" i] button'
+        ];
+        document.querySelectorAll(selectors.join(', ')).forEach(btn => {
+          dispatchClick(btn);
+        });
 
-          const playButtons = document.querySelectorAll(
-            // iSkills / EzyCourse / LMS specific
-            '._video_play_btn, ' +
-            '[class*="video_play" i], ' +
-            '[class*="play_icon" i], ' +
-            '[class*="play_btn" i], ' +
-            '[class*="playBtn" i], ' +
-            // Center / big play buttons
-            '.bmpui-ui-playbacktoggle-overlay, ' +
-            '.bmpui-ui-hugeplaybacktogglebutton, ' +
-            '.vjs-big-play-button, ' +
-            '.plyr__control--overlaid, ' +
-            '[data-plyr="play"], ' +
-            // Generic play buttons
-            '[aria-label="Play" i], ' +
-            '[aria-label*="play" i], ' +
-            '[title="Play" i], ' +
-            '[title*="play" i], ' +
-            'button[class*="play" i], ' +
-            'div[class*="play" i][role="button"], ' +
-            '[class*="play-button" i], ' +
-            '[class*="PlayButton" i], ' +
-            '[class*="big-play" i]'
-          );
-          playButtons.forEach(btn => {
-            try { btn.click(); } catch (_) {}
-          });
-
-          // Strategy 4: Click the video and its player container
-          try {
-            video.click();
-            const container = video.closest('.video-js, .plyr, [class*="player" i]') || video.parentElement;
-            if (container && container !== document.body) container.click();
-          } catch (_) {}
-
-          // Strategy 5: Autoplay policy fallback (brief mute then unmute to bypass strict browser block)
-          if (video.paused && autoPlayAttempts >= 2) {
-            video.muted = true;
-            video.play().then(() => {
-              setTimeout(() => { if (video) video.muted = false; }, 300);
-            }).catch(() => {});
-          }
-        }, 250);
+        // 5. Click the video and its parent container
+        try {
+          dispatchClick(video);
+          const container = video.closest('.video-js, .plyr, [class*="player" i]') || video.parentElement;
+          if (container && container !== document.body) dispatchClick(container);
+        } catch (_) {}
       });
     }
 
-    // Retry with increasing intervals if still paused
-    if (autoPlayAttempts < 6 && video.paused) {
-      setTimeout(() => {
-        if (video && video.paused && !video.ended) autoPlay();
-      }, autoPlayAttempts * 400 + 400);
+    // Keep retrying every 500ms until playing or 20 attempts
+    if (!autoPlayTimer && autoPlayAttempts < 20 && video.paused) {
+      autoPlayTimer = setInterval(() => {
+        if (!video || !video.paused || video.ended || autoPlayAttempts >= 20) {
+          clearInterval(autoPlayTimer);
+          autoPlayTimer = null;
+        } else {
+          autoPlay();
+        }
+      }, 500);
     }
   }
 
@@ -209,21 +218,58 @@
   function hidePlayerControls() {
     if (controlsHidden) return;
 
+    // Remove native controls attribute if present
+    if (video) {
+      try {
+        video.controls = false;
+        video.removeAttribute('controls');
+      } catch (_) {}
+    }
+
     const style = document.createElement('style');
     style.id = 'frame-recorder-hide-controls';
     style.textContent = `
       /* HTML5 native controls */
-      video::-webkit-media-controls { display: none !important; }
-      video::-webkit-media-controls-enclosure { display: none !important; }
+      video::-webkit-media-controls { display: none !important; opacity: 0 !important; }
+      video::-webkit-media-controls-enclosure { display: none !important; opacity: 0 !important; }
+      video::-webkit-media-controls-panel { display: none !important; opacity: 0 !important; }
 
-      /* EzyCourse / iSkills controls & overlays */
+      /* Force video element to fill container cleanly */
+      video {
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+        object-fit: contain !important;
+        cursor: none !important;
+      }
+
+      /* EzyCourse / iSkills / React LMS player controls & overlays */
       ._video_control_bar,
       [class*="course_player_controls" i],
       [class*="video_controls" i],
+      [class*="videoControls" i],
       [class*="control_bar" i],
       [class*="controlBar" i],
+      [class*="control-bar" i],
+      [class*="controls-bar" i],
       [class*="player_control" i],
       [class*="playerControl" i],
+      [class*="player-control" i],
+      [class*="player_bottom" i],
+      [class*="player-bottom" i],
+      [class*="bottom_controls" i],
+      [class*="bottom-controls" i],
+      [class*="bottomControls" i],
+      [class*="controls_container" i],
+      [class*="controls-container" i],
+      [class*="controls_wrapper" i],
+      [class*="controls-wrapper" i],
+      [class*="timeline" i],
+      [class*="scrubber" i],
+      [class*="progressbar" i],
+      [class*="progress_bar" i],
+      [class*="progress-bar" i],
 
       /* Plyr */
       .plyr__controls,
@@ -265,13 +311,10 @@
       [class*="logo-container" i],
       [class*="player-overlay" i],
       [class*="player-controls" i],
-      [class*="video-controls" i],
-      [class*="controls-wrapper" i],
-      [class*="bottom-controls" i],
-      [class*="top-controls" i],
-
-      /* Hide cursor on video during recording */
-      video { cursor: none !important; }
+      [class*="video-controls" i] {
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
     `;
     document.head.append(style);
 
@@ -324,6 +367,20 @@
       video.preload = 'auto';
       video.setAttribute('preload', 'auto');
       injectMainWorldBooster();
+    } catch (_) {}
+
+    // Expand video parent containers to 100% to prevent restricted sizing
+    try {
+      let p = video.parentElement;
+      while (p && p !== document.body && p !== document.documentElement) {
+        p.style.setProperty('width', '100%', 'important');
+        p.style.setProperty('height', '100%', 'important');
+        p.style.setProperty('max-width', 'none', 'important');
+        p.style.setProperty('max-height', 'none', 'important');
+        p.style.setProperty('margin', '0', 'important');
+        p.style.setProperty('padding', '0', 'important');
+        p = p.parentElement;
+      }
     } catch (_) {}
 
     // Auto-play and hide controls on first attach
