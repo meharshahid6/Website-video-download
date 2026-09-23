@@ -8,7 +8,7 @@ let qualitySince=0, qualityKey='';
 let frameCallback, lastDraw = 0, framesDrawn = 0, outputSize;
 let preparing = false, audioContext, analyser, audioSamples, lastHealth = 0, lastAudioActivity = 0;
 let audioDestination = null;
-let activeSince = 0, recordedMs = 0;
+let activeSince = 0, recordedMs = 0, bufferingSince = 0;
 
 function holdRecorder() {
   if (recorder?.state === 'recording') {
@@ -68,9 +68,12 @@ function draw(initialize = false) {
     }
     // Preserve aspect ratio if the user resizes the page; never stretch the video.
     const scale = Math.min(canvas.width/crop.width,canvas.height/crop.height);
-    const w = crop.width*scale, h = crop.height*scale;
-    context.fillRect(0,0,canvas.width,canvas.height);
-    context.drawImage(source,crop.x,crop.y,crop.width,crop.height,(canvas.width-w)/2,(canvas.height-h)/2,w,h);
+    const w = Math.round(crop.width*scale), h = Math.round(crop.height*scale);
+    if (w < canvas.width || h < canvas.height) {
+      context.fillStyle = '#000';
+      context.fillRect(0,0,canvas.width,canvas.height);
+    }
+    context.drawImage(source,crop.x,crop.y,crop.width,crop.height,Math.round((canvas.width-w)/2),Math.round((canvas.height-h)/2),w,h);
     framesDrawn++;
   } catch (error) {
     diagnostic = error.message;
@@ -186,13 +189,13 @@ async function start(streamId, viewport) {
   function onFrame() {
     if (ended) return;
     update();
-    if (performance.now()-lastDraw >= 30) draw();
+    if (performance.now()-lastDraw >= 25) draw();
     frameCallback = source.requestVideoFrameCallback(onFrame);
   }
   if (source.requestVideoFrameCallback) frameCallback = source.requestVideoFrameCallback(onFrame);
   // Worker fallback keeps canvas frames flowing when offscreen rendering callbacks stall.
   worker = new Worker('clock.js');
-  worker.onmessage = () => { update(); if (performance.now()-lastDraw>=30) draw(); worker?.postMessage('ack'); };
+  worker.onmessage = () => { update(); if (performance.now()-lastDraw>=25) draw(); worker?.postMessage('ack'); };
   update();
 }
 

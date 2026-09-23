@@ -39,8 +39,9 @@ function runMainWorldBufferBooster() {
   if (window.__frBufferBoosterActive) return;
   window.__frBufferBoosterActive = true;
 
+  const boostedSet = new WeakSet();
   function boost(obj) {
-    if (!obj || typeof obj !== 'object') return;
+    if (!obj || typeof obj !== 'object' || boostedSet.has(obj)) return;
     try {
       if (obj.config) {
         obj.config.maxBufferLength = 600;
@@ -51,6 +52,7 @@ function runMainWorldBufferBooster() {
         obj.config.lowLatencyMode = false;
         if (typeof obj.startLoad === 'function') obj.startLoad();
       }
+      boostedSet.add(obj);
     } catch (_) {}
   }
 

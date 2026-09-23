@@ -93,7 +93,8 @@
     ]) {
       const fn = () => {
         if (event === 'waiting') waiting = true;
-        if (event === 'playing') { waiting = false; autoplayBlocked = false; }
+        if (event === 'playing' || event === 'canplay') { waiting = false; autoplayBlocked = false; }
+        if (!video.paused && video.readyState >= 3) waiting = false;
         send(event);
       };
       video.addEventListener(event, fn);

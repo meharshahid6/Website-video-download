@@ -1,3 +1,3 @@
-let waiting=false;
-onmessage=()=>{waiting=false;};
-setInterval(()=>{if(!waiting){waiting=true;postMessage('tick');}},33);
+let pending=0;
+onmessage=()=>{pending=Math.max(0,pending-1);};
+setInterval(()=>{if(pending<2){pending++;postMessage('tick');}},32);
