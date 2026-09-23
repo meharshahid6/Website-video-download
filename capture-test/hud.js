@@ -13,6 +13,7 @@
       <span id="frhud-time">0:00</span>
       <span id="frhud-buf" title="Video buffered ahead in advance">⚡ 0s</span>
       <button id="frhud-play" title="Start video playback" style="display: none;">▶ Play</button>
+      <button id="frhud-min" title="Minimize / Expand HUD">—</button>
       <button id="frhud-stop" title="Stop recording">■</button>
     </div>
   `;
@@ -42,6 +43,11 @@
       border-radius: 9999px !important;
       box-shadow: 0 4px 20px rgba(0,0,0,0.35) !important;
       border: 1px solid rgba(255,255,255,0.15) !important;
+      cursor: grab !important;
+      touch-action: none !important;
+    }
+    #frhud-inner:active {
+      cursor: grabbing !important;
     }
     #frhud-dot {
       width: 9px !important;
@@ -108,6 +114,26 @@
     #frhud-play:hover {
       background: #1d4ed8 !important;
     }
+    #frhud-min {
+      background: rgba(255, 255, 255, 0.12) !important;
+      color: #94a3b8 !important;
+      border: none !important;
+      border-radius: 50% !important;
+      width: 20px !important;
+      height: 20px !important;
+      font-size: 11px !important;
+      cursor: pointer !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0 !important;
+      margin-left: 2px !important;
+      transition: all 0.15s !important;
+    }
+    #frhud-min:hover {
+      background: rgba(255, 255, 255, 0.25) !important;
+      color: #f8fafc !important;
+    }
     #frhud-stop {
       background: rgba(239, 68, 68, 0.85) !important;
       color: #fff !important;
@@ -127,6 +153,11 @@
     #frhud-stop:hover {
       background: rgba(239, 68, 68, 1) !important;
     }
+    #frhud-inner.minimized #frhud-health,
+    #frhud-inner.minimized #frhud-buf,
+    #frhud-inner.minimized #frhud-time {
+      display: none !important;
+    }
   `;
 
   document.head.append(style);
@@ -144,6 +175,8 @@
   const bufEl = hud.querySelector('#frhud-buf');
   const playBtn = hud.querySelector('#frhud-play');
   const stopBtn = hud.querySelector('#frhud-stop');
+  const innerEl = hud.querySelector('#frhud-inner');
+  const minBtn = hud.querySelector('#frhud-min');
 
   function formatTime(sec) {
     const m = Math.floor(sec / 60);
@@ -182,6 +215,52 @@
     updateDisplay();
   }, 500);
 
+  /* ── Minimize toggle ────────────────────────────────────────── */
+  minBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const isMin = innerEl.classList.toggle('minimized');
+    minBtn.textContent = isMin ? '+' : '—';
+    minBtn.title = isMin ? 'Expand HUD' : 'Minimize HUD';
+  });
+
+  /* ── Drag & Drop handling ───────────────────────────────────── */
+  let userDragged = false;
+  let isDragging = false;
+  let startX = 0, startY = 0, initialLeft = 14, initialTop = 14;
+
+  innerEl.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    isDragging = true;
+    userDragged = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = hud.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+    innerEl.setPointerCapture?.(e.pointerId);
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const maxL = Math.max(0, innerWidth - hud.offsetWidth - 8);
+    const maxT = Math.max(0, innerHeight - hud.offsetHeight - 8);
+    const newL = Math.max(8, Math.min(maxL, initialLeft + dx));
+    const newT = Math.max(8, Math.min(maxT, initialTop + dy));
+    hud.style.setProperty('left', newL + 'px', 'important');
+    hud.style.setProperty('top', newT + 'px', 'important');
+  });
+
+  const stopDrag = (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    if (e?.pointerId) innerEl.releasePointerCapture?.(e.pointerId);
+  };
+  window.addEventListener('pointerup', stopDrag);
+  window.addEventListener('pointercancel', stopDrag);
+
   /* ── Play button click: direct user interaction fallback ────── */
   playBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -204,14 +283,16 @@
       // Keep our overlay out of the captured video rectangle.
       hud.style.setProperty('visibility','hidden','important');
       if (r) {
-        const w = hud.offsetWidth, h = hud.offsetHeight;
-        const points = [[14,14],[14,innerHeight-h-14],[innerWidth-w-14,14],[innerWidth-w-14,innerHeight-h-14]];
-        const free = points.find(([x,y]) => x>=0 && y>=0 && (x+w<=r.x || x>=r.x+r.width || y+h<=r.y || y>=r.y+r.height));
-        if (free) {
-          hud.style.setProperty('left',free[0]+'px','important');
-          hud.style.setProperty('top',free[1]+'px','important');
-          hud.style.setProperty('visibility','visible','important');
+        if (!userDragged) {
+          const w = hud.offsetWidth, h = hud.offsetHeight;
+          const points = [[14,14],[14,innerHeight-h-14],[innerWidth-w-14,14],[innerWidth-w-14,innerHeight-h-14]];
+          const free = points.find(([x,y]) => x>=0 && y>=0 && (x+w<=r.x || x>=r.x+r.width || y+h<=r.y || y>=r.y+r.height));
+          if (free) {
+            hud.style.setProperty('left',free[0]+'px','important');
+            hud.style.setProperty('top',free[1]+'px','important');
+          }
         }
+        hud.style.setProperty('visibility','visible','important');
       }
     }
     if (msg.type === 'hud-status') {

@@ -30,7 +30,7 @@ async function reportFailure(error, stage = 'startup') {
   const detail = error?.message || String(error);
   badgeErr();
   await chrome.action.setTitle({ title: 'Recording error: ' + detail });
-  const report = { build: '0.9.9', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
+  const report = { build: '1.0.0', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
   await chrome.storage.local.set({ lastError: detail, lastFailure: report });
 }
 

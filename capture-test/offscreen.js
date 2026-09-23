@@ -1,4 +1,4 @@
-import { gate, cropPixels, nativeOutput, captureDimensions } from './common.js';
+import { gate, cropPixels, nativeOutput, captureDimensions, injectWebMDuration } from './common.js';
 
 let raw, output, recorder, worker, started = 0, recordingStarted = 0, ended = false, lastState;
 let playbackHasStarted = false, lastReceived = 0, previous = '', stopReason = '';
@@ -7,6 +7,7 @@ let diagnostic = '';
 let qualitySince=0, qualityKey='';
 let frameCallback, lastDraw = 0, framesDrawn = 0, outputSize;
 let preparing = false, audioContext, analyser, audioSamples, lastHealth = 0, lastAudioActivity = 0;
+let audioDestination = null;
 let activeSince = 0, recordedMs = 0;
 
 function holdRecorder() {
@@ -84,7 +85,12 @@ function startRecorder() {
   draw(true);
   if (!outputSize) return false;
   output = canvas.captureStream(0);
-  for (const track of raw.getAudioTracks()) output.addTrack(track);
+  const enhancedAudio = audioDestination?.stream?.getAudioTracks();
+  if (enhancedAudio && enhancedAudio.length > 0) {
+    for (const track of enhancedAudio) output.addTrack(track);
+  } else {
+    for (const track of raw.getAudioTracks()) output.addTrack(track);
+  }
   const hasAudio = output.getAudioTracks().length > 0;
   const mime = [
     ...(hasAudio ? ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus'] : []),
@@ -151,11 +157,28 @@ async function start(streamId, viewport) {
   captureSettings = raw.getVideoTracks()[0].getSettings();
   try {
     audioContext = new AudioContext();
+    const sourceNode = audioContext.createMediaStreamSource(raw);
+    const gainNode = audioContext.createGain();
+    gainNode.gain.value = 1.35;
+
+    const compressor = audioContext.createDynamicsCompressor();
+    compressor.threshold.value = -16;
+    compressor.knee.value = 24;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.005;
+    compressor.release.value = 0.15;
+
     analyser = audioContext.createAnalyser();
     audioSamples = new Float32Array(analyser.fftSize);
-    audioContext.createMediaStreamSource(raw).connect(analyser);
+    audioDestination = audioContext.createMediaStreamDestination?.() || null;
+
+    sourceNode.connect(gainNode);
+    gainNode.connect(compressor);
+    compressor.connect(analyser);
+    if (audioDestination) compressor.connect(audioDestination);
+
     await audioContext.resume();
-  } catch (_) { analyser = null; }
+  } catch (_) { analyser = null; audioDestination = null; }
   source.srcObject = raw;
   source.muted = true;
   await source.play();
@@ -178,6 +201,7 @@ function finish(reason) {
   ended = true;
   stopReason = reason;
   worker?.terminate();
+  audioDestination?.stream?.getTracks?.().forEach(t=>t.stop());
   audioContext?.close().catch(()=>{});
   if (frameCallback != null) source.cancelVideoFrameCallback?.(frameCallback);
   if (recorder && recorder.state !== 'inactive') { holdRecorder(); recorder.stop(); }
@@ -190,12 +214,17 @@ async function save() {
   output?.getTracks().forEach(track=>track.stop());
   source.srcObject = null;
   const report = {
-    testBuild:'0.9.9',strategy:'direct-webm-pause-resume',recordedSeconds:recordedMs/1000,cropAfterCapture:false,
+    testBuild:'1.0.0',strategy:'direct-webm-pause-resume',recordedSeconds:recordedMs/1000,cropAfterCapture:false,
     diagnostic,hasRecording:chunks.length>0,cropDuringCapture:true,lessonTitle:lastState?.lessonTitle || '',stopReason,captureSeconds,
     wallSeconds:(Date.now()-started)/1000,captureSettings,outputSize,framesDrawn,
     microphoneRequested:false,speakerRouting:false,events,geometry
   };
-  const videoUrl = chunks.length ? URL.createObjectURL(new Blob(chunks,{type:recorder.mimeType})) : null;
+  const durationMs = recordedMs > 0 ? recordedMs : (recordingStarted ? Date.now() - recordingStarted : 0);
+  let videoBlob = chunks.length ? new Blob(chunks, {type: recorder?.mimeType || 'video/webm'}) : null;
+  if (videoBlob && durationMs > 0 && typeof injectWebMDuration === 'function') {
+    try { videoBlob = await injectWebMDuration(videoBlob, durationMs); } catch (_) {}
+  }
+  const videoUrl = videoBlob ? URL.createObjectURL(videoBlob) : null;
   await chrome.runtime.sendMessage({type:'save-test',videoUrl,report,summary:{stopReason,diagnostic,hasVideo:!!videoUrl}});
 }
 
