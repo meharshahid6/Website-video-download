@@ -92,7 +92,10 @@
       'progress', 'error', 'loadedmetadata', 'resize', 'ratechange', 'volumechange', 'canplay'
     ]) {
       const fn = () => {
-        if (event === 'waiting') waiting = true;
+        if (event === 'waiting') {
+          const ahead = getBufferedAhead(video);
+          if (ahead < 1.5) waiting = true;
+        }
         if (event === 'playing' || event === 'canplay') { waiting = false; autoplayBlocked = false; }
         if (!video.paused && video.readyState >= 3) waiting = false;
         send(event);

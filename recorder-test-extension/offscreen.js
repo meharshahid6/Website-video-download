@@ -87,7 +87,7 @@ function draw(initialize = false) {
 function startRecorder() {
   draw(true);
   if (!outputSize) return false;
-  output = canvas.captureStream(0);
+  output = canvas.captureStream(30);
   const enhancedAudio = audioDestination?.stream?.getAudioTracks();
   if (enhancedAudio && enhancedAudio.length > 0) {
     for (const track of enhancedAudio) output.addTrack(track);
@@ -189,13 +189,13 @@ async function start(streamId, viewport) {
   function onFrame() {
     if (ended) return;
     update();
-    if (performance.now()-lastDraw >= 25) draw();
+    if (performance.now()-lastDraw >= 20) draw();
     frameCallback = source.requestVideoFrameCallback(onFrame);
   }
   if (source.requestVideoFrameCallback) frameCallback = source.requestVideoFrameCallback(onFrame);
   // Worker fallback keeps canvas frames flowing when offscreen rendering callbacks stall.
   worker = new Worker('clock.js');
-  worker.onmessage = () => { update(); if (performance.now()-lastDraw>=25) draw(); worker?.postMessage('ack'); };
+  worker.onmessage = () => { update(); if (performance.now()-lastDraw>=20) draw(); };
   update();
 }
 
