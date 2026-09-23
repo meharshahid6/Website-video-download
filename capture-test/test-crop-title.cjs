@@ -43,7 +43,7 @@ test('heading above player wins over sidebar and changes per lesson',()=>{
   assert.equal(extract(),'First lesson');lesson='Second lesson';assert.equal(extract(),'Second lesson');
 });
 test('recorder consumes cropped canvas track, preserves first chunk and tab audio',async()=>{
-  let listener,recordedStream,saved,clock=1000;
+  let listener,recordedStream,saved,clock=1000,instance;
   const messages=[];
   const draws=[],audio={kind:'audio',stop(){}},videoTrack={kind:'video',stop(){},getSettings:()=>({width:1600,height:900})};
   const raw={getVideoTracks:()=>[videoTrack],getAudioTracks:()=>[audio],getTracks:()=>[videoTrack,audio]};
@@ -53,8 +53,10 @@ test('recorder consumes cropped canvas track, preserves first chunk and tab audi
   const canvas={width:300,height:150,getContext:()=>({fillRect(){},drawImage(...args){draws.push(args)}}),captureStream:()=>output};
   class Recorder {
     static isTypeSupported(){return true}
-    constructor(stream,options){recordedStream=stream;this.mimeType=options.mimeType;this.state='inactive'}
+    constructor(stream,options){instance=this;recordedStream=stream;this.mimeType=options.mimeType;this.state='inactive'}
     start(){this.state='recording';this.ondataavailable({data:new Blob(['WEBM_HEADER'])})}
+    pause(){assert.equal(this.state,'recording');this.state='paused'}
+    resume(){assert.equal(this.state,'paused');this.state='recording'}
     stop(){this.state='inactive';this.onstop()}
   }
   const context={...helpers,document:{getElementById:id=>id==='source'?source:canvas},navigator:{mediaDevices:{getUserMedia:async()=>raw}},
@@ -75,9 +77,21 @@ test('recorder consumes cropped canvas track, preserves first chunk and tab audi
   assert.deepEqual(messages.filter(m=>['prepare-beginning','play-prepared'].includes(m.type)).map(m=>m.type),['prepare-beginning','play-prepared']);
   assert.equal(recordedStream,output);assert.ok(recordedStream.tracks.includes(audio));
   assert.deepEqual(Array.from(draws.at(-1).slice(1,5)),[320,180,960,540]);
+  const playing={paused:false,readyState:4,playbackRate:1,rect:{x:320,y:180,width:960,height:540},viewport:{width:1600,height:900},sourceWidth:1920,sourceHeight:1080,lessonTitle:'Test'};
+  const send=data=>listener({to:'recorder',type:'state',data:{...playing,...data}},null,()=>{});
+  assert.equal(instance.state,'recording');
+  clock+=1000;send({paused:true});assert.equal(instance.state,'paused');
+  clock+=4000;send({waiting:true});assert.equal(instance.state,'paused');
+  clock+=1000;send({});assert.equal(instance.state,'recording');
+  clock+=1000;send({seeking:true});assert.equal(instance.state,'paused');
+  clock+=1000;send({geometryError:'Frame missing'});assert.equal(instance.state,'paused');
+  clock+=1000;send({});assert.equal(instance.state,'recording');
   clock+=2000;listener({to:'recorder',type:'stop',reason:'test'},null,()=>{});
   assert.equal(await saved.videoUrl.text(),'WEBM_HEADER');
-  const report=JSON.parse(await saved.reportUrl.text());
+  const report=saved.report;
+  assert.equal(saved.reportUrl,undefined);
+  assert.equal(report.strategy,'direct-webm-pause-resume');
+  assert.equal(report.recordedSeconds,4);
   assert.equal(report.cropAfterCapture,false);assert.equal(report.outputSize.width,960);assert.equal(report.lessonTitle,'Test');
 });
 

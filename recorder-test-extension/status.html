@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Frame · Recording status</title><link rel="stylesheet" href="status.css"></head>
+<body><main>
+<header><img src="icons/icon-128.png" width="56" height="56" alt=""><div><h1>Frame</h1><p>LESSON RECORDER <span id="version"></span></p></div><span class="tag">Local recording</span></header>
+<section class="hero"><p class="eyebrow">YOUR RECORDER</p><h2 id="state" role="status">Checking status…</h2><p id="detail">Checking the latest recording on this device.</p><p id="lesson"></p></section>
+<section class="metrics" aria-label="Capture health"><article><p>Source video</p><strong id="source">—</strong></article><article><p>Recorded size</p><strong id="output">—</strong></article><article><p>Internal audio</p><strong id="audio">—</strong></article></section>
+<section><h2>A simple recording workflow</h2><ol><li>Open your lesson, then click the pinned Frame icon to start. The player expands inside its tab.</li><li>Frame waits for a 1080p source and restarts the lesson from the beginning. Use the original player controls if quality or playback needs your attention.</li><li>Pause and buffering automatically hold the recording. Playback resumes recording in the same WebM file.</li><li>Click the icon again to stop, or let the lesson finish. Wait for <b>DONE</b>, then open the WebM in Downloads / FrameCaptureTests.</li></ol></section>
+<section class="note"><h2>Know what is saved</h2><p><b>DONE</b> means your WebM download completed. No MP4 conversion or separate converter is needed.</p><p>Only the WebM downloads. The latest diagnostic report stays in local extension storage.</p></section>
+<section><h2>Before an important lesson</h2><p>Make a short sample and check picture, audio, pause/resume and background playback. A 1080p source does not guarantee 1080p output: the visible player size also matters.</p><p>Recordings stay in memory until stopped. Browser crashes, reloads and computer shutdown can lose the current recording. Crash recovery is not included in this release.</p><p>Preloading is best effort; it cannot guarantee uninterrupted playback. Brief transition frames can remain because player events and captured frames arrive asynchronously. Keep the lesson tab open and the computer awake. Controls or overlays inside the video rectangle can appear in the recording. Quiet audio may be normal silence.</p></section>
+<footer>No microphone requested · Status stays on this device · Release candidate</footer>
+</main><script src="status.js"></script></body></html>
+

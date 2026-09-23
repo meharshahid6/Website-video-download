@@ -1,6 +1,7 @@
 import { safeTitle } from './common.js';
 let session = null;
 let saving = false;
+let starting = false;
 async function waitForDownload(id) {
   const deadline = Date.now()+300000;
   while (Date.now() < deadline) {
@@ -29,17 +30,8 @@ async function reportFailure(error, stage = 'startup') {
   const detail = error?.message || String(error);
   badgeErr();
   await chrome.action.setTitle({ title: 'Recording error: ' + detail });
-  const report = { build: '0.9.6', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
+  const report = { build: '0.9.9', stage, error: detail, at: new Date().toISOString(), hasRecording: false };
   await chrome.storage.local.set({ lastError: detail, lastFailure: report });
-  const name = 'FrameCaptureTests/error-' + report.at.replace(/[:.]/g, '-') + '.json';
-  try {
-    await chrome.downloads.download({
-      url: 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(report, null, 2)),
-      filename: name, saveAs: false
-    });
-  } catch (saveError) {
-    await chrome.storage.local.set({ errorReportSaveFailure: saveError.message });
-  }
 }
 
 /* ── Main-world Buffer Booster ─────────────────────────────────── */
@@ -93,7 +85,7 @@ function runMainWorldBufferBooster() {
   }
 
   scan();
-  setInterval(scan, 2000);
+  window.__frBufferBoosterTimer = setInterval(scan, 2000);
 }
 
 /* ── Extract lesson title from page DOM ─────────────────────────── */
@@ -176,7 +168,7 @@ function extractLessonTitle() {
 
 /* ── Cleanup: remove HUD and stop monitor ──────────────────────── */
 async function cleanup(tabId) {
-  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'MAIN',func:()=>{clearInterval(window.__frQualityTimer);delete window.__frQualityTimer;}}).catch(()=>{});
+  await chrome.scripting.executeScript({target:{tabId,allFrames:true},world:'MAIN',func:()=>{clearInterval(window.__frQualityTimer);delete window.__frQualityTimer;clearInterval(window.__frBufferBoosterTimer);delete window.__frBufferBoosterTimer;delete window.__frBufferBoosterActive;}}).catch(()=>{});
   await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func: () => {
     window.__frRemoveControls?.();
     window.__frRestoreTheater?.();
@@ -187,8 +179,9 @@ async function cleanup(tabId) {
 
 /* ── Extension icon click handler ────────────────────────────── */
 chrome.action.onClicked.addListener(async tab => {
+  if (saving || starting) return;
+  starting = true;
   try {
-    if (saving) return;
     // Recover any stale session
     if (!session) session = (await chrome.storage.session.get('testSession')).testSession || null;
 
@@ -225,6 +218,7 @@ chrome.action.onClicked.addListener(async tab => {
     // Start session — NO window fullscreen, page stays exactly as user sees it
     session = { tabId: tab.id, frameId: null, started: Date.now(), filePrefix, lessonTitle, titleLocked: lessonTitle !== 'Lecture' };
     await chrome.storage.session.set({ testSession: session });
+    await chrome.storage.local.set({lastError:null,lastSave:null,recorderHealth:null,lastStatus:{status:'preparing'}});
     badgeWait();
     await chrome.action.setTitle({ title: 'Preparing recording...' });
 
@@ -266,6 +260,8 @@ chrome.action.onClicked.addListener(async tab => {
     session = null;
     await chrome.storage.session.remove('testSession');
     await chrome.offscreen.closeDocument().catch(() => {});
+  } finally {
+    starting = false;
   }
 });
 
@@ -355,8 +351,8 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         badgeRec();
         await chrome.action.setTitle({ title: 'Recording lecture...' });
       } else if (s === 'finished') {
-        badgeDone();
-        await chrome.action.setTitle({ title: 'Recording saved.' });
+        badge('SAVE','#2563eb');
+        await chrome.action.setTitle({ title: 'Recording stopped; saving downloads...' });
       } else {
         badgeHold();
         await chrome.action.setTitle({ title: 'On hold: ' + s });
@@ -380,16 +376,17 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       await chrome.action.setTitle({title:'Saving recording - waiting for downloads to complete...'});
       const prefix = session?.filePrefix || 'Video';
       const base = `FrameCaptureTests/${prefix}`;
+      let savedBase = base;
       let error = msg.videoUrl ? null : 'No video was recorded. ' + (msg.summary?.diagnostic || msg.summary?.stopReason || 'Check player status.');
       try {
-        // Await both downloads being accepted. Keep blob URLs alive until the next session.
-        // One shared suffix protects raw/report pairing on repeat recordings.
+        // Diagnostics stay local; successful recordings download one playable WebM.
+        if (msg.report) await chrome.storage.local.set({lastRecordingReport:msg.report});
         const earlier = await chrome.downloads.search({query:[base]});
         const suffix = earlier.length ? ' (' + Date.now() + ')' : '';
         const saveBase = base + suffix;
+        savedBase = saveBase;
         const ids = [];
-        if (msg.videoUrl) ids.push(await chrome.downloads.download({url:msg.videoUrl,filename:saveBase+'.raw.webm',saveAs:false}));
-        if (msg.reportUrl) ids.push(await chrome.downloads.download({url:msg.reportUrl,filename:saveBase+'.json',saveAs:false}));
+        if (msg.videoUrl) ids.push(await chrome.downloads.download({url:msg.videoUrl,filename:saveBase+'.webm',saveAs:false}));
         await Promise.all(ids.map(waitForDownload));
       } catch (e) { error = e.message; }
 
@@ -398,12 +395,19 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       session = null;
       await chrome.storage.session.remove('testSession');
 
-      await chrome.storage.local.set({ lastSave: { at: new Date().toISOString(), base, error } });
+      await chrome.storage.local.set({ lastSave: { at: new Date().toISOString(), base:savedBase, error } });
       saving = false;
+      if (!error) await chrome.offscreen.closeDocument().catch(()=>{});
       badge(error ? 'ERR' : 'DONE', error ? '#b3261e' : '#16a34a');
-      await chrome.action.setTitle({title:error || 'Raw video and report downloaded. Final MP4 is prepared separately.'});
+      await chrome.action.setTitle({title:error || 'WebM saved. Ready to play; no conversion needed.'});
     }
   })().then(() => respond({ok:true}), error => {
+    if (msg.type === 'save-test') {
+      saving = false;
+      badgeErr();
+      chrome.action.setTitle({title:'Save failed: '+error.message});
+      chrome.storage.local.set({lastError:error.message}).catch(()=>{});
+    }
     console.error('Recorder message failed:',error);
     respond({error:error.message});
   });

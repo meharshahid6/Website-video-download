@@ -39,7 +39,7 @@
     if (!video || !video.isConnected) return;
     const data = {
       event, paused: video.paused, ended: video.ended, seeking: video.seeking,
-      waiting, readyState: video.readyState, error: video.error?.message || null,
+      waiting, autoplayBlocked, readyState: video.readyState, error: video.error?.message || null,
       playbackRate: video.playbackRate, currentTime: video.currentTime,
       bufferedAhead: Math.round(getBufferedAhead(video)),
       sourceWidth: video.videoWidth, sourceHeight: video.videoHeight,
@@ -51,129 +51,22 @@
     chrome.runtime.sendMessage({ type: 'player-state', data }).catch(() => {});
   }
 
-  /* ── PointerEvent & MouseEvent multi-layer dispatcher ───────── */
-  function dispatchFullClick(el) {
-    if (!el) return;
-    try {
-      const r = el.getBoundingClientRect();
-      const cx = r.left + (r.width > 0 ? r.width / 2 : 0);
-      const cy = r.top + (r.height > 0 ? r.height / 2 : 0);
-      const opts = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: cx,
-        clientY: cy,
-        screenX: cx,
-        screenY: cy,
-        button: 0,
-        buttons: 1,
-        pointerId: 1,
-        pointerType: 'mouse',
-        isPrimary: true,
-        width: 1,
-        height: 1
-      };
-
-      try { el.dispatchEvent(new PointerEvent('pointerover', opts)); } catch (_) {}
-      try { el.dispatchEvent(new PointerEvent('pointerenter', opts)); } catch (_) {}
-      try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (_) {}
-      try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (_) {}
-      try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (_) {}
-      try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (_) {}
-      try { el.dispatchEvent(new MouseEvent('click', opts)); } catch (_) {}
-      if (typeof el.click === 'function') el.click();
-    } catch (_) {}
-  }
-
-  /* ── Universal Instant Auto-Play Engine ─────────────────────── */
-  let autoPlayTimer = null;
-  let autoPlayAttempts = 0;
-
+  // Browser autoplay may require a real click inside the player frame.
+  let autoplayBlocked = false, stopped = false;
   async function autoPlay() {
-    if (!video) return;
-    if (video.playbackRate !== 1) video.playbackRate = 1;
-    if (!video.paused && !video.ended) {
-      if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
-      return;
-    }
-    if (video.ended) return;
-
-    autoPlayAttempts++;
-
-    // 1. Direct unmuted play attempt
+    const target = video;
+    if (!target || stopped || target.ended) return {error:'Player unavailable.'};
     try {
-      const p = video.play();
-      if (p) await p;
-      if (!video.paused) {
-        if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
-        return;
-      }
-    } catch (_) {}
-
-    // 2. Muted-Autoplay Bypass (Chrome autoplay policy permits muted autoplay)
-    try {
-      const wasMuted = video.muted;
-      video.muted = true;
-      await video.play();
-      setTimeout(() => { if (video) video.muted = wasMuted ? true : false; }, 150);
-      if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
-      return;
-    } catch (_) {}
-
-    // 3. Multi-layer probe at center of video (circular blue play button on iSkills etc.)
-    try {
-      const r = video.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
-        const elements = document.elementsFromPoint ? document.elementsFromPoint(cx, cy) : [document.elementFromPoint(cx, cy)];
-        for (const el of elements) {
-          if (el && el !== document.body && el !== document.documentElement) {
-            dispatchFullClick(el);
-            const parent = el.closest('button, [role="button"], a, div');
-            if (parent && parent !== el) dispatchFullClick(parent);
-          }
-        }
-      }
-    } catch (_) {}
-
-    // 4. Click all known play buttons in DOM
-    const selectors = [
-      '._video_play_btn', '.play-button', '.play_btn', '[class*="play_btn" i]',
-      '[class*="play-btn" i]', '[class*="playBtn" i]', '[class*="video_play" i]',
-      '[class*="play_icon" i]', '[class*="playIcon" i]',
-      '.bmpui-ui-playbacktoggle-overlay', '.bmpui-ui-hugeplaybacktogglebutton',
-      '.vjs-big-play-button', '.vjs-play-control', '.plyr__control--overlaid',
-      '[data-plyr="play"]', '[aria-label="Play" i]', '[aria-label*="play" i]',
-      '[title="Play" i]', '[title*="play" i]',
-      'button[class*="play" i]', 'div[role="button"][class*="play" i]',
-      '[class*="play-pause" i]', '[class*="play_pause" i]',
-      '._video_control_bar button', '[class*="control_bar" i] button',
-      '[class*="player_control" i] button', '[class*="controls" i] button'
-    ];
-    document.querySelectorAll(selectors.join(', ')).forEach(btn => {
-      dispatchFullClick(btn);
-    });
-
-    // 5. Click the video and immediate parent
-    try {
-      dispatchFullClick(video);
-      if (video.parentElement && video.parentElement !== document.body) {
-        dispatchFullClick(video.parentElement);
-      }
-    } catch (_) {}
-
-    // Keep retrying every 500ms until playing or 25 attempts
-    if (!autoPlayTimer && autoPlayAttempts < 25 && video.paused) {
-      autoPlayTimer = setInterval(() => {
-        if (!video || !video.paused || video.ended || autoPlayAttempts >= 25) {
-          clearInterval(autoPlayTimer);
-          autoPlayTimer = null;
-        } else {
-          autoPlay();
-        }
-      }, 500);
+      await target.play();
+      if (target !== video || stopped) return {error:'Player changed.'};
+      autoplayBlocked = false;
+      send('play-requested');
+      return {ok:true};
+    } catch (error) {
+      if (target !== video || stopped) return {error:'Player changed.'};
+      autoplayBlocked = error.name === 'NotAllowedError';
+      send('play-blocked');
+      return autoplayBlocked ? {ok:true,needsGesture:true} : {error:error.message};
     }
   }
 
@@ -191,6 +84,7 @@
     video = candidate;
     if (!video) return;
     waiting = false;
+    autoplayBlocked = false;
 
     // Attach event listeners
     for (const event of [
@@ -199,7 +93,7 @@
     ]) {
       const fn = () => {
         if (event === 'waiting') waiting = true;
-        if (event === 'playing') waiting = false;
+        if (event === 'playing') { waiting = false; autoplayBlocked = false; }
         send(event);
       };
       video.addEventListener(event, fn);
@@ -231,7 +125,6 @@
       (async () => {
         if (!video || !Number.isFinite(video.duration)) throw Error('Restart requires a seekable recorded lesson.');
         const target = video;
-        if (autoPlayTimer) { clearInterval(autoPlayTimer); autoPlayTimer = null; }
         target.pause();
         if (target.currentTime > 0.05) {
           await new Promise((resolve,reject) => {
@@ -247,22 +140,9 @@
       })().then(respond,error=>respond({error:error.message}));
       return true;
     }
-    if (msg.type === 'play-prepared') {
-      if (!video) { respond({error:'Player unavailable.'}); return; }
-      video.play().then(()=>respond({ok:true}),error=>respond({error:error.message}));
+    if (msg.type === 'play-prepared' || msg.type === 'hud-play-now') {
+      autoPlay().then(respond);
       return true;
-    }
-    // Explicit user play click from HUD button
-    if (msg.type === 'hud-play-now') {
-      if (video) {
-        video.play().catch(() => {
-          video.muted = true;
-          video.play().then(() => {
-            setTimeout(() => { if (video) video.muted = false; }, 150);
-          }).catch(() => {});
-        });
-        dispatchFullClick(video);
-      }
     }
 
     if (msg.type === 'find-frame') {
@@ -304,7 +184,7 @@
       clearInterval(interval);
       window.removeEventListener('scroll', onLayout, true);
       window.removeEventListener('resize', onLayout);
-      if (autoPlayTimer) clearInterval(autoPlayTimer);
+      stopped = true;
       observer.disconnect();
       for (const [el, event, fn] of listeners) el.removeEventListener(event, fn);
       chrome.runtime.onMessage.removeListener(message);

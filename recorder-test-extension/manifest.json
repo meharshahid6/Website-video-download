@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Universal Video Course Recorder",
-  "version": "0.9.6",
+  "name": "Frame \u2014 Lesson Recorder",
+  "version": "0.9.9",
   "minimum_chrome_version": "116",
   "description": "Record only the visible lesson video with internal tab audio and automatic lesson-title filenames.",
   "permissions": [
@@ -16,10 +16,23 @@
     "<all_urls>"
   ],
   "action": {
-    "default_title": "Start / stop lecture recording"
+    "default_title": "Start / stop lecture recording",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "options_page": "status.html",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   }
 }

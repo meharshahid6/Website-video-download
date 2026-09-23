@@ -101,7 +101,6 @@
       font-size: 12px !important;
       font-weight: 600 !important;
       cursor: pointer !important;
-      display: inline-flex !important;
       align-items: center !important;
       gap: 4px !important;
       transition: background 0.15s !important;
@@ -167,7 +166,7 @@
       playBtn.style.display = 'inline-flex';
     } else {
       dot.className = 'hold';
-      statusEl.textContent = ({'select-1080p-quality':'SELECT 1080p','waiting-for-quality-stable':'QUALITY CHECK','preparing-beginning':'REWINDING','buffering':'BUFFERING'})[currentStatus] || 'WAIT';
+      statusEl.textContent = ({'click-player-to-start':'CLICK PLAYER PLAY','select-1080p-quality':'SELECT 1080p','waiting-for-quality-stable':'QUALITY CHECK','preparing-beginning':'REWINDING','buffering':'BUFFERING'})[currentStatus] || 'WAIT';
       playBtn.style.display = 'inline-flex';
     }
     timeEl.textContent = formatTime(recordingSeconds);
@@ -198,7 +197,7 @@
   });
 
   /* ── Listen for status updates from background ──────────────── */
-  chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+  const onMessage = (msg, _sender, respond) => {
     if (msg.type === 'hud-health') hud.querySelector('#frhud-health').textContent = msg.label;
     if (msg.type === 'hud-geometry') {
       const r = msg.rect;
@@ -237,7 +236,7 @@
         bufEl.style.color = '#4ade80';
         bufEl.style.background = 'rgba(74, 222, 128, 0.15)';
         bufEl.style.borderColor = 'rgba(74, 222, 128, 0.3)';
-        bufEl.title = `Healthy buffer: ${sec}s ahead in advance. Safe from disconnects!`;
+        bufEl.title = `Healthy buffer: ${sec}s ahead in advance. Playback can continue only while buffered data lasts.`;
       } else if (sec >= 20) {
         bufEl.style.color = '#38bdf8';
         bufEl.style.background = 'rgba(56, 189, 248, 0.15)';
@@ -254,8 +253,10 @@
       clearInterval(timer);
       hud.remove();
       style.remove();
+      chrome.runtime.onMessage.removeListener(onMessage);
     }
-  });
+  };
+  chrome.runtime.onMessage.addListener(onMessage);
 
   lastTick = Date.now();
   updateDisplay();

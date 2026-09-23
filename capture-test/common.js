@@ -2,6 +2,7 @@ export function gate(state) {
   if (!state) return 'waiting-for-player';
   if (state.ended) return 'ended';
   if (state.error) return 'player-error';
+  if (state.autoplayBlocked && state.paused) return 'click-player-to-start';
   if (state.paused) return 'paused';
   if (state.seeking) return 'seeking';
   if (state.waiting || state.readyState < 3) return 'buffering';

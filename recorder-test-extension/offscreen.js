@@ -7,6 +7,15 @@ let diagnostic = '';
 let qualitySince=0, qualityKey='';
 let frameCallback, lastDraw = 0, framesDrawn = 0, outputSize;
 let preparing = false, audioContext, analyser, audioSamples, lastHealth = 0, lastAudioActivity = 0;
+let activeSince = 0, recordedMs = 0;
+
+function holdRecorder() {
+  if (recorder?.state === 'recording') {
+    recorder.pause();
+    if (activeSince) recordedMs += Date.now()-activeSince;
+    activeSince = 0;
+  }
+}
 
 function health() {
   if (ended || Date.now()-lastHealth < 1000) return;
@@ -31,7 +40,7 @@ async function prepareBeginning() {
     const play = await chrome.runtime.sendMessage({type:'play-prepared'});
     if (!play?.ok) throw Error(play?.error || 'Press Play in the original player to continue.');
   } catch (error) { diagnostic = error.message; finish(error.message); }
-  finally { preparing = false; }
+  finally { preparing = false; update(); }
 }
 const source = document.getElementById('source');
 const canvas = document.getElementById('crop');
@@ -44,6 +53,7 @@ function currentCrop() {
 
 function draw(initialize = false) {
   if (ended || !raw || source.readyState < 2 || (!outputSize && !initialize)) return;
+  if (!initialize && recorder?.state !== 'recording') return;
   // Never draw the entire page as a fallback when geometry is missing or stale.
   context.fillStyle = '#000';
   try {
@@ -61,8 +71,10 @@ function draw(initialize = false) {
     context.fillRect(0,0,canvas.width,canvas.height);
     context.drawImage(source,crop.x,crop.y,crop.width,crop.height,(canvas.width-w)/2,(canvas.height-h)/2,w,h);
     framesDrawn++;
-  } catch (_) {
-    context.fillRect(0,0,canvas.width,canvas.height);
+  } catch (error) {
+    diagnostic = error.message;
+    holdRecorder();
+    return;
   }
   output?.getVideoTracks()[0]?.requestFrame?.();
   lastDraw = performance.now();
@@ -87,7 +99,8 @@ function startRecorder() {
   recordingStarted = Date.now();
   playbackHasStarted = true;
   recorder.start(1000);
-  draw();
+  // Arm the container before playback; exclude the seek/preparation interval.
+  recorder.pause();
   return true;
 }
 
@@ -112,6 +125,14 @@ function update() {
       if (!preparing) prepareBeginning();
       state = 'preparing-beginning';
     }
+  }
+  if (preparing) state = 'preparing-beginning';
+  if (recorder && recorder.state !== 'inactive') {
+    if (state === 'recording' && recorder.state === 'paused') {
+      recorder.resume();
+      activeSince = Date.now();
+      draw();
+    } else if (state !== 'recording') holdRecorder();
   }
   if (state !== previous) {
     previous = state;
@@ -159,7 +180,7 @@ function finish(reason) {
   worker?.terminate();
   audioContext?.close().catch(()=>{});
   if (frameCallback != null) source.cancelVideoFrameCallback?.(frameCallback);
-  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  if (recorder && recorder.state !== 'inactive') { holdRecorder(); recorder.stop(); }
   else save();
 }
 
@@ -169,14 +190,13 @@ async function save() {
   output?.getTracks().forEach(track=>track.stop());
   source.srcObject = null;
   const report = {
-    testBuild:'0.9.6',strategy:'continuous-capture-then-trim',cropAfterCapture:false,
+    testBuild:'0.9.9',strategy:'direct-webm-pause-resume',recordedSeconds:recordedMs/1000,cropAfterCapture:false,
     diagnostic,hasRecording:chunks.length>0,cropDuringCapture:true,lessonTitle:lastState?.lessonTitle || '',stopReason,captureSeconds,
     wallSeconds:(Date.now()-started)/1000,captureSettings,outputSize,framesDrawn,
     microphoneRequested:false,speakerRouting:false,events,geometry
   };
   const videoUrl = chunks.length ? URL.createObjectURL(new Blob(chunks,{type:recorder.mimeType})) : null;
-  const reportUrl = URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
-  await chrome.runtime.sendMessage({type:'save-test',videoUrl,reportUrl,summary:{stopReason,diagnostic,hasVideo:!!videoUrl}});
+  await chrome.runtime.sendMessage({type:'save-test',videoUrl,report,summary:{stopReason,diagnostic,hasVideo:!!videoUrl}});
 }
 
 chrome.runtime.onMessage.addListener((msg,_sender,respond)=>{

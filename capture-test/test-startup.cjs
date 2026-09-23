@@ -21,8 +21,8 @@ function harness({storedSession=null,captureError=null,startError=null}={}){
 }
 test('capture setup failure writes readable diagnostics and clears session',async()=>{
   const h=harness({captureError:'Capture permission unavailable'});await h.run();
-  assert.equal(h.saved.testSession,undefined);assert.equal(h.saved.lastError,'Capture permission unavailable');assert.equal(h.downloads.length,1);
-  const report=JSON.parse(decodeURIComponent(h.downloads[0].url.split(',')[1]));assert.equal(report.error,'Capture permission unavailable');assert.equal(report.hasRecording,false);
+  assert.equal(h.saved.testSession,undefined);assert.equal(h.saved.lastError,'Capture permission unavailable');assert.equal(h.downloads.length,0);
+  const report=h.saved.lastFailure;assert.equal(report.error,'Capture permission unavailable');assert.equal(report.hasRecording,false);
 });
 test('offscreen start error is not mistaken for successful capture',async()=>{
   const h=harness({startError:'No internal tab audio track.'});await h.run();
@@ -35,6 +35,11 @@ test('stale session without an offscreen document can start again',async()=>{
   assert.ok(h.injections.some(x=>x.files?.includes('monitor.js')));
 });
 test('successful startup installs monitor and does not emit failure report',async()=>{
-  const h=harness();await h.run();assert.equal(h.downloads.length,0);assert.equal(h.saved.lastError,undefined);
+  const h=harness();await h.run();assert.equal(h.downloads.length,0);assert.equal(h.saved.lastError,null);
   assert.ok(h.injections.some(x=>x.files?.includes('monitor.js')));
+});
+
+test('rapid duplicate clicks start only one capture',async()=>{
+  const h=harness();await Promise.all([h.run(),h.run()]);
+  assert.equal(h.messages.filter(x=>x.type==='start').length,1);
 });
